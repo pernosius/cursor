@@ -28,7 +28,7 @@ const readTheme = (): Theme => {
 export const applyTheme = (t: Theme) => {
   const resolved = t === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : t;
   document.documentElement.dataset.theme = resolved;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'light' ? '#f4f5f9' : '#0b0d12');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'light' ? '#efe4cb' : '#15110d');
 };
 
 const pushToast = (set: (fn: (s: UiState) => Partial<UiState>) => void, toast: Toast) => {

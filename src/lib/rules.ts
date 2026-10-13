@@ -39,20 +39,20 @@ export const ALIGNMENTS = [
 
 /** Accent colors per class — the heart of the sheet's look. */
 export const CLASS_COLORS: Record<string, string> = {
-  barbarian: '#e5484d',
-  bard: '#d55bd0',
-  cleric: '#e6b73a',
-  druid: '#4cb764',
-  fighter: '#e7843d',
-  monk: '#25b8a5',
-  paladin: '#3ea0f0',
-  ranger: '#9ab83a',
-  rogue: '#8a86b3',
-  sorcerer: '#ec4d8a',
-  warlock: '#a35cf0',
-  wizard: '#5b74f5',
+  barbarian: '#b4472f', // dried blood
+  bard: '#b5617a', // rose madder
+  cleric: '#cdb26a', // vellum gold
+  druid: '#6f8f3c', // moss
+  fighter: '#b06a3b', // rust
+  monk: '#c98a2e', // saffron
+  paladin: '#8a9cb0', // burnished steel
+  ranger: '#4f7748', // pine
+  rogue: '#7d7a72', // pewter
+  sorcerer: '#a63d4a', // crimson
+  warlock: '#3f8a7d', // verdigris
+  wizard: '#4f74a8', // lapis
 };
-export const DEFAULT_ACCENT = '#8b7cf6';
+export const DEFAULT_ACCENT = '#b8955a';
 
 export const accentOf = (c: Pick<Character, 'accent' | 'classes'>) => {
   if (c.accent) return c.accent;

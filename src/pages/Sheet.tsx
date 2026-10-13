@@ -140,7 +140,7 @@ export default function Sheet() {
         <button className="qstat" onClick={() => setModal('hp')}>
           <b>
             {c.hp.current}
-            {c.hp.temp > 0 && <small style={{ color: '#7cc4ff', fontSize: 13 }}> +{c.hp.temp}</small>}
+            {c.hp.temp > 0 && <small style={{ color: 'var(--temp)', fontSize: 13 }}> +{c.hp.temp}</small>}
           </b>
           <span>HP / {c.hp.max}</span>
         </button>

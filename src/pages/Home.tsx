@@ -152,9 +152,9 @@ export default function Home() {
 
       {live.length === 0 ? (
         <div className="empty">
-          <h2 className="display">Every legend starts somewhere</h2>
+          <h2 className="display">The ledger is empty</h2>
           <p className="muted" style={{ maxWidth: 420, margin: '0 auto 20px' }}>
-            Create your first character. The 2024 rules are built in, so the math is done for you.
+            Roll up your first adventurer. The 2024 rules are built in, so the sums are done for you.
           </p>
           <div className="row" style={{ justifyContent: 'center' }}>
             <button className="btn primary" onClick={() => navigate('/new')}>
@@ -232,7 +232,7 @@ function CharacterCard({ c, index }: { c: Character; index: number }) {
           <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
             <b>{c.hp.current}</b>
             <span>/ {c.hp.max} HP</span>
-            {c.hp.temp > 0 && <span style={{ color: '#7cc4ff' }}>+{c.hp.temp}</span>}
+            {c.hp.temp > 0 && <span style={{ color: 'var(--temp)' }}>+{c.hp.temp}</span>}
           </div>
           <div style={{ marginTop: 6 }}>
             <HpBar current={c.hp.current} max={c.hp.max} temp={c.hp.temp} />

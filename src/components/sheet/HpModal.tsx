@@ -24,7 +24,7 @@ export function HpPanel({ c, upd }: { c: Character; upd: Upd }) {
         <span className="big">{c.hp.current}</span>
         <span className="of">/ {c.hp.max}</span>
         {c.hp.temp > 0 && (
-          <span className="chip" style={{ color: '#7cc4ff', marginLeft: 6 }}>
+          <span className="chip" style={{ color: 'var(--temp)', marginLeft: 6 }}>
             +{c.hp.temp} temp
           </span>
         )}
@@ -62,7 +62,7 @@ export function HpPanel({ c, upd }: { c: Character; upd: Upd }) {
         </button>
         <button
           className="btn"
-          style={{ color: '#7cc4ff' }}
+          style={{ color: 'var(--temp)' }}
           disabled={!n}
           title="Set temporary HP"
           onClick={() => {

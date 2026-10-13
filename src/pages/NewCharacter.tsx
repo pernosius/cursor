@@ -154,7 +154,7 @@ export default function NewCharacter() {
                   value={name}
                   placeholder="e.g. Seraphine Ashvale"
                   onChange={(e) => setName(e.target.value)}
-                  style={{ fontSize: 18, fontFamily: 'var(--font-display)' }}
+                  style={{ fontSize: 19, fontWeight: 700 }}
                 />
               </label>
             </div>

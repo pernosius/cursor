@@ -196,6 +196,22 @@ export const verifyCode = async (email: string, token: string) => {
   if (error) throw error;
 };
 
+export const signInWithPassword = async (email: string, password: string) => {
+  const { error } = await supabase()!.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+};
+
+/** Returns true when the account is ready, false when the email must be confirmed first. */
+export const signUpWithPassword = async (email: string, password: string) => {
+  const { data, error } = await supabase()!.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: redirectUrl() },
+  });
+  if (error) throw error;
+  return !!data.session;
+};
+
 export const signOut = async () => {
   await supabase()?.auth.signOut();
   channel?.unsubscribe();

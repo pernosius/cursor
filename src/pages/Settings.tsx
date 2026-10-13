@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Cloud, KeyRound, LogOut, Mail, Monitor, Moon, RefreshCw, Sun } from 'lucide-react';
-import { configure, sendSignInEmail, signOut, syncNow, useSync } from '../sync/engine';
+import { configure, sendSignInEmail, signInWithPassword, signOut, signUpWithPassword, syncNow, useSync } from '../sync/engine';
 import { getConfig, isBuiltInConfig } from '../sync/client';
 import { useUi, type Theme } from '../store/ui';
 import { useCharacters } from '../store/characters';
@@ -49,7 +49,7 @@ export default function Settings() {
             Tome keeps your characters on this device first, so it works offline, and syncs them to your own Supabase project
             when you're signed in. Add it to your home screen to use it like an app.
           </p>
-          <p className="tiny faint">{SRD_ATTRIBUTION}</p>
+          <p className="tiny faint" style={{ overflowWrap: 'anywhere' }}>{SRD_ATTRIBUTION}</p>
         </div>
       </div>
     </div>
@@ -108,15 +108,19 @@ function SyncCard() {
 }
 
 function SignIn({ onEditConfig }: { onEditConfig: () => void }) {
+  const [method, setMethod] = useState<'password' | 'email'>('password');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setErr(null);
+    setInfo(null);
     try {
       await fn();
     } catch (e) {
@@ -126,11 +130,64 @@ function SignIn({ onEditConfig }: { onEditConfig: () => void }) {
     }
   };
 
+  const validEmail = email.includes('@');
+
   return (
     <div className="col" style={{ gap: 12 }}>
-      {!sent ? (
+      <div className="seg" style={{ alignSelf: 'flex-start' }}>
+        <button className={cx(method === 'password' && 'on')} onClick={() => setMethod('password')}>
+          Password
+        </button>
+        <button className={cx(method === 'email' && 'on')} onClick={() => setMethod('email')}>
+          Email link
+        </button>
+      </div>
+
+      {method === 'password' ? (
+        <form
+          className="col"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(() => signInWithPassword(email.trim(), password));
+          }}
+        >
+          <p className="small muted">
+            Use the same email and password on every device. New here? Fill both in and choose <b>Create account</b>.
+          </p>
+          <input className="input" type="email" required placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+          <input
+            className="input"
+            type="password"
+            required
+            minLength={6}
+            placeholder="Password (6+ characters)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <div className="row wrap">
+            <button className="btn primary" disabled={busy || !validEmail || password.length < 6}>
+              <KeyRound /> Sign in
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !validEmail || password.length < 6}
+              onClick={() =>
+                void run(async () => {
+                  const ready = await signUpWithPassword(email.trim(), password);
+                  if (!ready)
+                    setInfo('Account created. Open the confirmation email, tap the link (any device or browser is fine), then come back and press Sign in.');
+                })
+              }
+            >
+              Create account
+            </button>
+          </div>
+        </form>
+      ) : !sent ? (
         <>
-          <p className="small muted">Enter your email. We'll send a sign-in link and a 6-digit code. No password needed.</p>
+          <p className="small muted">We'll email you a sign-in link. Open it on this device, in this browser.</p>
           <form
             className="row"
             onSubmit={(e) => {
@@ -142,7 +199,7 @@ function SignIn({ onEditConfig }: { onEditConfig: () => void }) {
             }}
           >
             <input className="input grow" type="email" required placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-            <button className="btn primary" disabled={busy || !email.includes('@')}>
+            <button className="btn primary" disabled={busy || !validEmail}>
               <Mail /> Send
             </button>
           </form>
@@ -150,8 +207,7 @@ function SignIn({ onEditConfig }: { onEditConfig: () => void }) {
       ) : (
         <>
           <p className="small muted">
-            Check <b style={{ color: 'var(--text)' }}>{email}</b>. Tap the link on this device, or type the code here (handy for
-            home-screen apps on iPhone).
+            Check <b style={{ color: 'var(--text)' }}>{email}</b> and tap the link. If the email contains a code instead, type it here.
           </p>
           <form
             className="row"
@@ -164,7 +220,7 @@ function SignIn({ onEditConfig }: { onEditConfig: () => void }) {
               className="input grow num"
               inputMode="numeric"
               autoComplete="one-time-code"
-              placeholder="123456"
+              placeholder="Code"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
               style={{ letterSpacing: '0.3em', fontSize: 18, textAlign: 'center' }}
@@ -178,6 +234,7 @@ function SignIn({ onEditConfig }: { onEditConfig: () => void }) {
           </button>
         </>
       )}
+      {info && <p className="small" style={{ color: 'var(--success)' }}>{info}</p>}
       {err && <p className="small" style={{ color: 'var(--danger)' }}>{err}</p>}
       {!isBuiltInConfig() && (
         <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={onEditConfig}>

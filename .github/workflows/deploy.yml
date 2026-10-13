@@ -29,9 +29,11 @@ jobs:
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
-          # Optional: set these as repository variables to preconfigure sync on every device.
-          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          # Supabase project baked into the build so every device is preconfigured.
+          # The publishable key is meant to be public; row-level security protects the data.
+          # Repository variables SUPABASE_URL / SUPABASE_ANON_KEY override these.
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://bposdbkylaskuecbtwrc.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || 'sb_publishable_a2MU8nr5l-XewSGv4BGtNg_3RfRHyYf' }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

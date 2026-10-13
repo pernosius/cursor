@@ -20,7 +20,7 @@ create policy "Characters are private to their owner" on public.characters
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create or replace function public.characters_before_write() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = '' as $$
 begin
   -- Never let an older edit overwrite a newer one.
   if tg_op = 'UPDATE' and new.updated_at < old.updated_at then

@@ -27,21 +27,35 @@ const parts = {
   APP: inlineScript(read('src/app.js')),
 };
 
-let html = read('src/index.html');
-for (const [key, value] of Object.entries(parts)) {
-  const marker = `<!--@${key}@-->`;
-  if (!html.includes(marker)) throw new Error(`Template is missing ${marker}`);
-  html = html.split(marker).join(value);
+function render(extra) {
+  let html = read('src/index.html');
+  for (const [key, value] of Object.entries({ ...parts, ...extra })) {
+    const marker = `<!--@${key}@-->`;
+    if (!html.includes(marker)) throw new Error(`Template is missing ${marker}`);
+    html = html.split(marker).join(value);
+  }
+  const leftover = html.match(/<!--@[A-Z_]+@-->/);
+  if (leftover) throw new Error(`Unfilled placeholder ${leftover[0]}`);
+  const remote = html.match(/\b(?:src|href)\s*=\s*["']?(?:https?:)?\/\//i);
+  if (remote) throw new Error(`Build references a remote resource: ${remote[0]}`);
+  return html;
 }
-const leftover = html.match(/<!--@[A-Z_]+@-->/);
-if (leftover) throw new Error(`Unfilled placeholder ${leftover[0]}`);
-const remote = html.match(/\b(?:src|href)\s*=\s*["']?(?:https?:)?\/\//i);
-if (remote) throw new Error(`Build references a remote resource: ${remote[0]}`);
+const html = render({ DEMO_SCRIPT: '' });
+
+// Demo for presenting as a claude.ai Artifact: sample orders, on-screen label preview, and no
+// document wrapper (the Artifact publisher adds its own doctype, head and body).
+const demo = render({ DEMO_SCRIPT: `<script>\n${inlineScript(read('src/demo.js'))}</script>` })
+  .replace(/^<!DOCTYPE html>\s*<html[^>]*>\s*<head>\s*<meta charset="UTF-8">\s*<meta name="viewport"[^>]*>\s*/, '')
+  .replace(/<title>Print Counter<\/title>\s*/, '')
+  .replace(/<\/head>\s*<body>\s*/, '')
+  .replace(/<\/body>\s*<\/html>\s*$/, '');
+if (/^\s*<(?:!DOCTYPE|html|head)/i.test(demo) || /<\/html>\s*$/i.test(demo) || !demo.startsWith('<meta name="theme-color"')) throw new Error('Demo still has a document wrapper');
 
 const dist = join(root, 'dist');
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'Print Counter'), { recursive: true });
 writeFileSync(join(dist, 'Print-Counter.html'), html);
+writeFileSync(join(dist, 'Print-Counter-Demo.html'), '<title>Print Counter</title>\n' + demo);
 
 // Store-PC folder: the app plus the launcher. Windows scripts and text get CRLF line endings.
 const crlf = s => s.replace(/\r?\n/g, '\r\n');
@@ -57,6 +71,7 @@ const kb = n => Math.round(n / 1024) + ' KB';
 console.log(`dist/Print-Counter.html      ${kb(Buffer.byteLength(html))}`);
 console.log(`dist/Print Counter/          ${files.map(f => f[0]).join(', ')}`);
 console.log(`dist/Print-Counter-App.zip`);
+console.log(`dist/Print-Counter-Demo.html  ${kb(Buffer.byteLength(demo))} (for presenting as a claude.ai Artifact)`);
 
 /* Minimal zip writer (deflate), so the build needs no extra dependencies. */
 function zip(entries) {

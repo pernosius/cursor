@@ -86,8 +86,15 @@ const state={
   orders:[], archived:null, mode:'loading', view:'board', search:'', filter:'all'
 };
 
-/* save a generated file (PDF, CSV, backup) as a normal browser download */
+/* save a generated file (PDF, CSV, backup): through the claude.ai viewer's download prompt when
+   this page runs as a published Artifact, otherwise as a normal browser download */
+let downloadsNs=null;
+try{ if(window.claude&&typeof window.claude.use==='function') window.claude.use('downloads').then(d=>{downloadsNs=d}).catch(()=>{}); }catch(e){}
 async function saveFile(name,data,mime){
+  if(downloadsNs){
+    try{await downloadsNs.save({filename:name,data});return 'saved'}
+    catch(e){return e&&e.code==='declined'?'declined':'failed'}
+  }
   try{
     const blob=data instanceof Blob?data:new Blob([data],{type:mime||'application/octet-stream'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');
@@ -1003,7 +1010,31 @@ function printOrder(o){
     }
     if(!fitted){ if(maxLines<=1) fitted=true; else maxLines--; }
   }
+  if(window.PC_DEMO) return showLabelPreview(o);
   setTimeout(()=>{try{window.print()}catch(e){toast('Printing is blocked here. Open this page in its own tab and try again.')}},60);
+}
+/* demo build only: the published demo can't open the print dialog, so show the two labels on screen */
+function showLabelPreview(o){
+  let dlg=$('#lblDlg');
+  if(!dlg){
+    dlg=document.createElement('div'); dlg.className='dlg-scrim'; dlg.id='lblDlg';
+    dlg.innerHTML='<div class="dlg lbl-pv" role="dialog" aria-modal="true" aria-labelledby="lblPvTitle"><h3 id="lblPvTitle"></h3><p>On the store PC, Print label sends these two separate 4\u00d76 labels to the label printer.</p><div class="lbl-pv-row" id="lblPvRow"></div><div class="dlg-acts"><button class="btn btn-primary" id="lblPvClose">Close</button></div></div>';
+    document.body.appendChild(dlg);
+    const close=()=>dlg.classList.remove('on');
+    $('#lblPvClose').onclick=close;
+    dlg.addEventListener('click',e=>{if(e.target===dlg)close()});
+    dlg.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();close()}});
+  }
+  $('#lblPvTitle').textContent=`Labels for order #${o.num}`;
+  const caps=['Label 1: goes on the bag','Label 2: store copy'];
+  $('#lblPvRow').innerHTML='';
+  $$('#printArea .lbl').forEach((l,i)=>{
+    const fig=document.createElement('figure'); fig.className='lbl-pv-fig';
+    const box=document.createElement('div'); box.className='lbl-pv-box'; box.appendChild(l.cloneNode(true));
+    const cap=document.createElement('figcaption'); cap.textContent=caps[i]||'';
+    fig.append(box,cap); $('#lblPvRow').appendChild(fig);
+  });
+  dlg.classList.add('on'); setTimeout(()=>$('#lblPvClose').focus(),30);
 }
 
 /* ---------- detailed order form ---------- */

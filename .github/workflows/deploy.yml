@@ -2,7 +2,8 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # Deploys from the default branch (this repo currently has only this branch).
+    branches: [main, claude/dnd-character-sheet-keeper-5w0uwp]
   workflow_dispatch:
 
 permissions:

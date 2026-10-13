@@ -77,10 +77,10 @@ mode (its own window). `READ ME.txt` in that folder has the full steps, backup a
   widened to suit it.
 - If the browser's storage is full, saving now shows "Storage is full" instead of failing silently.
 
-## Open question
+## Tax on fees
 
-Should rush, design, set up and additional fees be taxed? They are now, as in the original; this was asked in the
-chat and never answered (SPEC section 17).
+Rush, design, set up and additional fees are taxed along with the items; postage is not. The store owner confirmed
+this (SPEC sections 5 and 16).
 
 ## Credits
 

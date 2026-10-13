@@ -227,7 +227,7 @@ postage     = r2(num0(postage))                       // never taxed
 total       = taxable + tax + postage
 amountDue   = paid ? 0 : max(0, total − num0(deposit))
 ```
-Fees are taxed (an open question to the owner; see section 17).
+Fees are taxed. The owner confirmed this; don't add a per-fee taxable option.
 
 **Breakdown rows** (drawer footer, label 1, PDFs), only non-zero optional rows:
 `Subtotal`, `Discount (10%)` (negative, shown green in UI), `Discount` (negative), each fee row, `Tax (7%)` or `Tax (exempt)`, `Postage (no tax)`, then **Total**. Labels and invoices add **Deposit paid** and **Amount due** when a deposit exists and the order is unpaid.
@@ -368,9 +368,10 @@ The folder shipped to the store contains `Print-Counter.html`, `Print Counter.ic
 - **Order Image** from the Access form was intentionally left out (browser storage limits).
 - No `.exe`/Electron. Use the app-mode launcher.
 - Charge copy acct, Promotion, Followed up and Associate are stored but have no extra behavior yet.
+- Rush, design, set up and additional fees **are taxed** (confirmed by the owner). Only postage is untaxed.
 
 ## 17. Open items / not yet done
-1. **Are rush / design / set up / additional fees taxable?** Currently all are taxed. This was asked and never answered. Consider a per-fee "taxable" setting.
+1. ~~Are rush / design / set up / additional fees taxable?~~ Answered: yes, all fees are taxed (current behavior).
 2. The label print layout hasn't been verified on the store's actual thermal printer.
 3. The launcher hasn't been run on a real Windows 11 PC.
 4. Two PCs don't share data (localStorage is per browser). Multi-PC sync would need a server or shared file and is out of scope unless the owner asks.

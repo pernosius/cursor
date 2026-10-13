@@ -1,0 +1,16 @@
+{
+  "name": "print-counter",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Offline order tracker for a UPS Store print counter. Builds to one self-contained HTML file.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/build.mjs && node tests/acceptance.mjs",
+    "icon": "node scripts/make-icon.mjs"
+  },
+  "devDependencies": {
+    "jspdf": "2.5.1",
+    "jspdf-autotable": "3.8.2"
+  }
+}

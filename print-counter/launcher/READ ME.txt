@@ -1,0 +1,42 @@
+PRINT COUNTER: SETUP
+
+Print Counter opens in its own window with a teal printer icon, no tabs or address
+bar. It works fully offline and needs no account, internet, or install.
+
+SETTING IT UP ON THE STORE PC
+1. Move this whole "Print Counter" folder somewhere permanent, like Documents.
+   Don't run it from inside the zip or from Downloads.
+2. Double-click "Set Up Print Counter.bat". If Windows shows a blue warning,
+   click More info, then Run anyway. It only creates shortcuts.
+3. A "Print Counter" shortcut appears on the Desktop and in the Start menu, and
+   the app opens.
+4. To keep it on the taskbar, right-click the Desktop shortcut and choose Pin to
+   taskbar. On Windows 11, click Show more options first.
+
+FIRST-TIME SETTINGS
+- Settings: fill in the store name, address, phone and email (they print on
+  quotes and invoices). Add your items in Price list. To continue numbering from
+  the old system, set the next order number.
+
+BACKUPS (IMPORTANT)
+- Orders are saved inside the browser on this PC. Don't clear browsing data.
+- Settings > Back up now saves one .json file with every order, customer, price
+  and setting. Keep it on a flash drive or cloud folder, not only this PC.
+- When it has been 7+ days since the last backup, the corner of the menu turns
+  yellow and says Back up now.
+- Settings > Restore from backup loads a backup file. It is also how you move
+  everything to another PC.
+
+LABEL PRINTING (first time, in the print window)
+- Printer: the label printer. Paper size: 4 x 6 in. Margins: None.
+  Scale: 100%. Headers and footers: off.
+- Each Print label prints two separate 4x6 labels: the order label for the bag
+  and the store copy you keep.
+
+UPDATING
+1. Settings > Back up now.
+2. Replace Print-Counter.html in this folder with the new one (same name, same
+   folder). The shortcuts and your orders stay put.
+
+If you used Print Counter in Chrome before and the app opens in Edge, back up
+in Chrome first, then Restore from backup in the app.

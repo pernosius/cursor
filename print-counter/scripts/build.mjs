@@ -2,7 +2,7 @@
 //   dist/Print-Counter.html        the app (CSS, JS, fonts, icon and PDF libraries inlined)
 //   dist/Print Counter/            the folder that goes on the store PC (app + launcher, CRLF scripts)
 //   dist/Print-Counter-App.zip     that folder, zipped
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 import { join } from 'node:path';
@@ -25,6 +25,10 @@ const parts = {
   AUTOTABLE: inlineScript(read('node_modules/jspdf-autotable/dist/jspdf.plugin.autotable.min.js')),
   PDF_FONTS: JSON.stringify({ regular: b64('fonts/pdf/Libron-Regular.ttf'), bold: b64('fonts/pdf/Libron-Bold.ttf') }),
   APP: inlineScript(read('src/app.js')),
+  // Shared-store sync (Supabase). The publishable key is meant to be public; row-level security
+  // in supabase/schema.sql limits the data to the store login. Leave sync.config.json out to build without sync.
+  SUPABASE: inlineScript(read('node_modules/@supabase/supabase-js/dist/umd/supabase.js')),
+  SYNC_CONFIG: existsSync(join(root, 'sync.config.json')) ? JSON.stringify(JSON.parse(read('sync.config.json'))) : 'null',
 };
 
 function render(extra) {
@@ -44,7 +48,7 @@ const html = render({ DEMO_SCRIPT: '' });
 
 // Demo for presenting as a claude.ai Artifact: sample orders, on-screen label preview, and no
 // document wrapper (the Artifact publisher adds its own doctype, head and body).
-const demo = render({ DEMO_SCRIPT: `<script>\n${inlineScript(read('src/demo.js'))}</script>` })
+const demo = render({ DEMO_SCRIPT: `<script>\n${inlineScript(read('src/demo.js'))}</script>`, SUPABASE: '', SYNC_CONFIG: 'null' })
   .replace(/^<!DOCTYPE html>\s*<html[^>]*>\s*<head>\s*<meta charset="UTF-8">\s*<meta name="viewport"[^>]*>\s*/, '')
   .replace(/<title>Print Counter<\/title>\s*/, '')
   .replace(/<\/head>\s*<body>\s*/, '')

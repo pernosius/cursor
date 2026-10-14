@@ -4,8 +4,9 @@ An offline order tracker for a UPS Store print counter. It replaces the store's 
 across a six-stage board, orders are priced with fees, discounts, 7% sales tax and untaxed postage, each job prints two
 4×6 thermal labels, and quotes and invoices download as PDFs.
 
-The app builds to **one self-contained HTML file** that runs from `file://` in Edge or Chrome with no internet, account
-or install. Data lives in the browser's `localStorage` on that PC, with Back up / Restore to a `.json` file.
+The app builds to **one self-contained HTML file** that runs from `file://` in Edge or Chrome with no install. Data
+lives in the browser's `localStorage` on each PC, with Back up / Restore to a `.json` file, and can optionally sync
+live between PCs (below).
 
 This is a rebuild of the version made in a Claude chat ("Print production tracking system for UPS Store"). It keeps that
 version's behavior and its storage format, so orders already entered there survive when this file replaces it in the
@@ -29,6 +30,37 @@ same folder.
 - **Customers:** order history grouped by phone number, with reorder.
 - **Price list, settings, dropdown lists**, CSV export, backup / restore with a weekly reminder.
 - **Four designs** (Fluent, Counter, Ticket, Press), each in light and dark mode.
+- **Sync between computers** (optional): live shared orders through Supabase, still working offline.
+
+## Sync between computers
+
+Every computer at the counter can share the same orders, customers, prices and settings live, through a free
+Supabase project (`print-counter`, created for this). Each computer still keeps its own copy, so it keeps working
+when the internet drops and catches up when it's back.
+
+**Setting it up**
+1. On the first computer (the one with the current orders): **Settings → Sync between computers → Create store
+   login** with a store email and a password of 8+ characters. Supabase emails a confirmation link: click it (the page
+   it opens may show an error; that's fine), then come back and choose **Sign in**. This computer's orders and settings
+   become the shared store.
+2. On every other computer: same panel, **Sign in** with the same email and password. A computer that already has its
+   own orders is asked whether to add them to the shared store or replace them with the shared ones (a backup file is
+   saved first if you replace).
+
+**How it behaves**
+- Changes show on the other computers within a second or two. The rail shows **Synced**, **Sending…**, or
+  **Offline, N waiting**.
+- Order numbers come from the shared store, so two computers never hand out the same number. A computer that is
+  offline when it creates an order uses its own next number, which could repeat one made elsewhere at the same time.
+- If two computers edit the same order, the most recent edit wins.
+- Only the first account that signs in can ever use the store. Any other account is refused.
+- **Stop syncing on this computer** keeps its orders and stops sharing.
+
+**Behind it:** `supabase/schema.sql` (tables, access rules, order-number counter) is applied to the Supabase project
+`qybhzlksddjjpsqqlmxk`. `sync.config.json` holds its URL and publishable key, which the build bakes into the app; that
+key is designed to be public, and the access rules keep the data to the store login. Remove the file to build without
+sync. Two things to know about Supabase's free plan: a project with no activity for 7 days is paused (restore it from
+the dashboard), and the confirmation email can be turned off under Authentication → Providers → Email → Confirm email.
 
 ## Build and test
 
@@ -36,7 +68,7 @@ same folder.
 cd print-counter
 npm install
 npm run build   # → dist/Print-Counter.html, dist/Print Counter/, dist/Print-Counter-App.zip
-npm test        # builds, then runs the acceptance checks in headless Chromium
+npm test        # builds, then runs the acceptance and sync checks in headless Chromium
 ```
 
 The tests need Playwright with Chromium (`npm i -D playwright && npx playwright install chromium` if you don't already
@@ -71,8 +103,8 @@ mode (its own window). `READ ME.txt` in that folder has the full steps, backup a
 
 ## Differences from the original chat version
 
-- Runs fully offline: jsPDF is inlined instead of loaded from a CDN, and the "save to your Claude account" sync was
-  removed. Data is saved in this browser only, exactly like the downloadable version from the chat.
+- Runs fully offline: jsPDF is inlined instead of loaded from a CDN. The "save to your Claude account" sync was
+  replaced by optional Supabase sync that works from the installed file and keeps working offline.
 - Uses the Libron typeface (embedded) in the app, labels and PDFs, as the spec asks. Label money columns were
   widened to suit it.
 - If the browser's storage is full, saving now shows "Storage is full" instead of failing silently.

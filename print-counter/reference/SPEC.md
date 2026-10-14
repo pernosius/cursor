@@ -355,6 +355,14 @@ The folder shipped to the store contains `Print-Counter.html`, `Print Counter.ic
 - **Updating = replacing `Print-Counter.html` in the same folder.** Same `file://` origin, so data persists. This is why the storage keys must not change.
 - Not yet verified on real Windows hardware.
 
+## 15a. Sync between computers (added after the rebuild)
+Optional live sync through Supabase (`supabase/schema.sql`, `sync.config.json`); the owner chose Supabase with one shared
+store login. Each computer stays offline-first: `pc_state_v2` remains the working copy, changes queue in `pc_sync_outbox`
+and are pushed as rows (`orders`: one JSON document per order, soft deletes; `store_settings`), other computers' changes
+arrive through Realtime and "changed since" pulls (`pc_sync` holds the cursor). Last edit wins by the order's
+`updatedAt`. New order numbers come from `take_order_num()`. The first account to call `claim_store()` is the store's
+only member; row-level security refuses everyone else. Nothing touches the network until someone signs in.
+
 ## 16. Decisions already made (don't regress)
 - Labels are **two separate 4×6 labels**, not one label with a tear line. No "Tear here" text, no barcode, no scissors.
 - The store copy shows **no** paid/not-paid. It shows INVOICE only for invoice orders.
@@ -374,7 +382,7 @@ The folder shipped to the store contains `Print-Counter.html`, `Print Counter.ic
 1. ~~Are rush / design / set up / additional fees taxable?~~ Answered: yes, all fees are taxed (current behavior).
 2. The label print layout hasn't been verified on the store's actual thermal printer.
 3. The launcher hasn't been run on a real Windows 11 PC.
-4. Two PCs don't share data (localStorage is per browser). Multi-PC sync would need a server or shared file and is out of scope unless the owner asks.
+4. ~~Two PCs don't share data.~~ Done: optional Supabase sync (section 15a).
 5. Order Image attachment (deferred).
 
 ## 18. Acceptance checklist

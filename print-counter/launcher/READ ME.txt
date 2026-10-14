@@ -18,6 +18,13 @@ FIRST-TIME SETTINGS
   quotes and invoices). Add your items in Price list. To continue numbering from
   the old system, set the next order number.
 
+SYNC BETWEEN COMPUTERS (OPTIONAL)
+- Settings > Sync between computers. On the first computer choose Create store
+  login (store email + password), click the link in the confirmation email,
+  then Sign in. On every other computer, Sign in with the same email and
+  password. Orders then show up on all of them within a second or two.
+- Each computer keeps working without internet and catches up when it's back.
+
 BACKUPS (IMPORTANT)
 - Orders are saved inside the browser on this PC. Don't clear browsing data.
 - Settings > Back up now saves one .json file with every order, customer, price

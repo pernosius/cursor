@@ -116,6 +116,7 @@ async function saveSettings(s){
   state.settings=normalizeSettings(s);
   renderChrome();
   persistLocal();
+  queueSettings();
 }
 async function saveOrder(o){
   o.updatedAt=nowIso();
@@ -128,6 +129,7 @@ async function saveOrder(o){
   renderBoard();
   const j=localAll.findIndex(x=>x.id===o.id); if(j>=0) localAll[j]=o; else localAll.push(o);
   persistLocal();
+  queueOrders([o.id]);
   renderBackupStatus();
 }
 async function removeOrder(id){
@@ -135,6 +137,7 @@ async function removeOrder(id){
   if(state.archived) state.archived=state.archived.filter(x=>x.id!==id);
   renderBoard();
   localAll=localAll.filter(x=>x.id!==id); persistLocal();
+  queueOrders([id]);
 }
 async function fetchArchived(){
   return localAll.filter(o=>o.archived).sort((a,b)=>String(b.closedAt).localeCompare(String(a.closedAt)));
@@ -147,7 +150,282 @@ async function connect(){
   try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(); }catch(e){}
   renderBackupStatus();
   applyLocalOrders(); renderAll();
+  renderSyncUi(); startSync();
 }
+
+/* ---------- sync between computers ----------
+   Each computer keeps its own copy (localStorage) and works offline. When signed in with the store
+   login, every change is queued in an outbox and pushed to the shared store; changes from other
+   computers arrive live and on every pull. Conflicts: the most recent edit wins. */
+const LS_SYNC='pc_sync';            // {on, email, cursor, settingsAt}
+const LS_OUTBOX='pc_sync_outbox';   // {orders:{id:queuedAt}, settings:queuedAt|null}
+function supabaseAdapter(cfg){
+  const lib=window.supabase;
+  if(!lib||!lib.createClient||!cfg||!cfg.url||!cfg.key) return null;
+  let client=null;
+  const c=()=>client||(client=lib.createClient(cfg.url,cfg.key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:'pc_sync_auth'}}));
+  const ok=r=>{if(r.error)throw r.error;return r.data};
+  return {
+    async getSession(){const r=await c().auth.getSession();if(r.error)throw r.error;return r.data.session?{email:r.data.session.user.email}:null},
+    async signIn(email,password){const d=ok(await c().auth.signInWithPassword({email,password}));return {email:d.user.email}},
+    async signUp(email,password){const d=ok(await c().auth.signUp({email,password}));return {email,needsConfirm:!d.session}},
+    async signOut(){try{await c().auth.signOut({scope:'local'})}catch(e){}},
+    async claim(){return ok(await c().rpc('claim_store'))},
+    async pullOrders(since){
+      const rows=[];let cur=since||null;
+      for(;;){
+        let q=c().from('orders').select('id,num,data,deleted,client_updated_at,server_at').order('server_at',{ascending:true}).limit(1000);
+        if(cur) q=q.gt('server_at',cur);
+        const page=ok(await q); rows.push(...page);
+        if(page.length) cur=page[page.length-1].server_at;
+        if(page.length<1000) break;
+      }
+      return {rows,cursor:cur};
+    },
+    async pullSettings(){const r=ok(await c().from('store_settings').select('data,client_updated_at').eq('id','store').limit(1));return r[0]||null},
+    async pushOrders(rows){for(let i=0;i<rows.length;i+=200) ok(await c().from('orders').upsert(rows.slice(i,i+200)))},
+    async pushSettings(row){ok(await c().from('store_settings').upsert(Object.assign({id:'store'},row)))},
+    async takeNum(min){return ok(await c().rpc('take_order_num',{min_num:min}))},
+    subscribe(onOrder,onSettings,onStatus){
+      const ch=c().channel('print-counter')
+        .on('postgres_changes',{event:'*',schema:'public',table:'orders'},p=>{if(p.new&&p.new.id)onOrder(p.new)})
+        .on('postgres_changes',{event:'*',schema:'public',table:'store_settings'},p=>{if(p.new&&p.new.data)onSettings(p.new)})
+        .subscribe(s=>onStatus(s));
+      return ()=>{try{c().removeChannel(ch)}catch(e){}};
+    }
+  };
+}
+const syncAdapter=window.PC_SYNC_ADAPTER||supabaseAdapter(window.PC_SYNC_CONFIG);
+const sync={phase:'off',email:'',error:'',lastOk:0,live:false,unsub:null,flushTimer:0,retryTimer:0,flushing:false,again:false,pulling:false,warned:{},msg:''};
+const tms=s=>{const t=Date.parse(s||'');return isFinite(t)?t:0};
+function syncMeta(){return Object.assign({on:false},lsGet(LS_SYNC,null)||{})}
+function setSyncMeta(p){lsSet(LS_SYNC,Object.assign(syncMeta(),p))}
+function syncOn(){return !!syncAdapter&&!!syncMeta().on}
+function getOutbox(){const o=lsGet(LS_OUTBOX,null)||{};return {orders:o.orders||{},settings:o.settings||null}}
+function setOutbox(o){lsSet(LS_OUTBOX,o)}
+function pendingCount(){const o=getOutbox();return Object.keys(o.orders).length+(o.settings?1:0)}
+function queueOrders(ids){if(!syncOn()||!ids.length)return;const o=getOutbox(),at=nowIso();ids.forEach(id=>{o.orders[id]=at});setOutbox(o);scheduleFlush()}
+function queueSettings(){if(!syncOn())return;const o=getOutbox();o.settings=nowIso();setOutbox(o);setSyncMeta({settingsAt:o.settings});scheduleFlush()}
+function scheduleFlush(ms){clearTimeout(sync.flushTimer);sync.flushTimer=setTimeout(flush,ms==null?300:ms);renderSyncUi()}
+function isAuthError(e){return !!e&&(e.status===401||e.code==='PGRST301'||/jwt|refresh token|not authenticated|sign in first/i.test(String(e.message||'')))}
+function syncOk(){sync.phase='ok';sync.error='';sync.lastOk=Date.now();clearTimeout(sync.retryTimer);renderSyncUi()}
+function syncFail(e){
+  if(isAuthError(e)) sync.phase='signedout';
+  else if(e&&(e.code==='42501'||/not allowed|row-level security/i.test(String(e.message||'')))){sync.phase='error';sync.error='This login no longer has access to the shared store.'}
+  else {sync.phase='offline';sync.error=''}
+  renderSyncUi();
+  clearTimeout(sync.retryTimer);
+  if(sync.phase==='offline') sync.retryTimer=setTimeout(()=>{pull();scheduleFlush(0)},20000);
+}
+async function flush(){
+  if(!syncOn()||sync.phase==='signedout') return;
+  if(sync.flushing){sync.again=true;return}
+  const ob=getOutbox(), ids=Object.keys(ob.orders);
+  if(!ids.length&&!ob.settings) return;
+  sync.flushing=true;
+  try{
+    if(ids.length){
+      const rows=ids.map(id=>{
+        const o=localAll.find(x=>x.id===id);
+        return o?{id,num:o.num||null,data:o,archived:!!o.archived,deleted:false,client_updated_at:o.updatedAt||ob.orders[id]}
+               :{id,num:null,data:null,archived:false,deleted:true,client_updated_at:ob.orders[id]};
+      });
+      await syncAdapter.pushOrders(rows);
+      const cur=getOutbox(); ids.forEach(id=>{if(cur.orders[id]===ob.orders[id]) delete cur.orders[id]}); setOutbox(cur);
+    }
+    if(ob.settings){
+      await syncAdapter.pushSettings({data:state.settings,client_updated_at:ob.settings});
+      const cur=getOutbox(); if(cur.settings===ob.settings) cur.settings=null; setOutbox(cur);
+    }
+    syncOk();
+  }catch(e){syncFail(e)}
+  finally{sync.flushing=false; if(sync.again){sync.again=false;scheduleFlush(0)}}
+}
+/* merge rows from the shared store into this computer's copy; returns true if anything changed */
+function applyRemoteRows(rows){
+  let changed=false;
+  for(const r of rows||[]){
+    if(!r||!r.id) continue;
+    const ob=getOutbox(), pend=ob.orders[r.id];
+    const i=localAll.findIndex(x=>x.id===r.id), local=i>=0?localAll[i]:null;
+    const remoteAt=tms(r.client_updated_at||(r.data&&r.data.updatedAt));
+    if(pend){
+      const mineAt=local?tms(local.updatedAt):tms(pend);
+      if(mineAt>=remoteAt) continue;            // our newer change is on its way up
+      delete ob.orders[r.id]; setOutbox(ob);    // theirs is newer: drop ours
+    }
+    if(r.deleted||!r.data){ if(local){localAll.splice(i,1);changed=true} continue; }
+    if(local&&local.updatedAt===r.data.updatedAt) continue;
+    if(local&&tms(local.updatedAt)>remoteAt){ queueOrders([r.id]); continue; }
+    if(local) localAll[i]=r.data; else localAll.push(r.data);
+    changed=true;
+  }
+  if(changed) afterRemoteChange();
+  return changed;
+}
+function afterRemoteChange(){
+  try{persistLocal()}catch(e){}
+  applyLocalOrders();
+  if(state.archived) state.archived=localAll.filter(o=>o.archived).sort((a,b)=>String(b.closedAt).localeCompare(String(a.closedAt)));
+  renderBoard();
+  if(state.view==='customers') renderCustomers();
+  if(drawerOpen&&draft&&!isNew){
+    const now=localAll.find(x=>x.id===draft.id), orig=JSON.parse(draftOrig);
+    if(!now) toast(`Order #${draft.num} was deleted on another computer.`);
+    else if(now.updatedAt!==orig.updatedAt&&sync.warned[draft.id]!==now.updatedAt){
+      sync.warned[draft.id]=now.updatedAt;
+      toast(`Order #${draft.num} was just changed on another computer. Close and reopen it to see the change.`);
+    }
+  }
+}
+function applyRemoteSettings(row){
+  if(!row||!row.data) return;
+  const ob=getOutbox(), remoteAt=tms(row.client_updated_at), localAt=tms(syncMeta().settingsAt);
+  if(remoteAt<=localAt) return;
+  if(ob.settings){ob.settings=null;setOutbox(ob)}
+  state.settings=normalizeSettings(row.data);
+  setSyncMeta({settingsAt:row.client_updated_at});
+  try{persistLocal()}catch(e){}
+  renderChrome(); if(state.view==='settings') renderSettings(true);
+}
+async function pull(){
+  if(!syncOn()||sync.pulling||sync.phase==='signedout') return;
+  sync.pulling=true;
+  try{
+    const r=await syncAdapter.pullOrders(syncMeta().cursor||null);
+    applyRemoteRows(r.rows);
+    if(r.cursor) setSyncMeta({cursor:r.cursor});
+    applyRemoteSettings(await syncAdapter.pullSettings());
+    syncOk();
+    if(pendingCount()) scheduleFlush(0);
+  }catch(e){syncFail(e)}
+  finally{sync.pulling=false}
+}
+async function startSync(){
+  if(!syncOn()){renderSyncUi();return}
+  sync.phase='connecting'; renderSyncUi();
+  let s=null;
+  try{ s=await syncAdapter.getSession(); }catch(e){ return syncFail(e); }
+  if(!s){ sync.phase='signedout'; renderSyncUi(); return; }
+  sync.email=s.email;
+  if(!sync.unsub) sync.unsub=syncAdapter.subscribe(
+    row=>applyRemoteRows([row]),
+    row=>applyRemoteSettings(row),
+    st=>{const was=sync.live; sync.live=st==='SUBSCRIBED'; if(sync.live&&!was) pull(); renderSyncUi()});
+  await pull();
+}
+function stopLive(){if(sync.unsub){sync.unsub();sync.unsub=null}sync.live=false}
+/* order numbers come from the shared store so two computers never hand out the same # */
+async function nextOrderNumber(min){
+  if(syncOn()&&sync.phase!=='signedout'){
+    try{ const n=await Promise.race([syncAdapter.takeNum(min),new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))]); if(Number.isInteger(n)&&n>=min) return n; }
+    catch(e){ /* offline: fall back to this computer's numbering */ }
+  }
+  return min;
+}
+async function syncSignIn(create){
+  const email=$('#sync-email').value.trim(), pw=$('#sync-pass').value;
+  if(!email||!pw){sync.msg='Enter the store login email and password.';renderSyncUi();return}
+  if(create&&pw.length<8){sync.msg='Use a password of at least 8 characters.';renderSyncUi();return}
+  sync.msg=create?'Creating the store login…':'Signing in…'; sync.busyUi=true; renderSyncUi();
+  try{
+    if(create){
+      const r=await syncAdapter.signUp(email,pw);
+      if(r.needsConfirm){sync.msg=`Almost done: open the email sent to ${email} and click the confirmation link, then come back here and choose Sign in. (The page the link opens may show an error; that's fine.)`;return}
+    }else await syncAdapter.signIn(email,pw);
+    const res=await syncAdapter.claim();
+    if(res==='denied'){await syncAdapter.signOut();sync.msg='That login isn’t this store’s sync login. Use the login set up on the first computer.';return}
+    const {rows,cursor}=await syncAdapter.pullOrders(null);
+    const remoteIds=new Set(rows.map(r=>r.id)), remoteCount=rows.filter(r=>!r.deleted&&r.data).length;
+    const localOnly=localAll.filter(o=>!remoteIds.has(o.id));
+    let upload=[];
+    if(!remoteCount) upload=localAll.map(o=>o.id);
+    else if(localOnly.length){
+      const ch=await confirmDlg({title:'Combine orders?',body:`The shared store has ${remoteCount} order${remoteCount===1?'':'s'}. This computer has ${localOnly.length} order${localOnly.length===1?'':'s'} that ${localOnly.length===1?'isn’t':'aren’t'} in it. Add them to the shared store, or replace this computer’s orders with the shared ones? (A backup of this computer is saved first if you replace.)`,ok:'Add them',alt:'Use shared orders only'});
+      if(!ch){await syncAdapter.signOut();sync.msg='Sign-in canceled. Nothing changed.';return}
+      if(ch===true) upload=localOnly.map(o=>o.id);
+      else{
+        await saveFile('print-counter-backup-before-sync-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({app:'print-counter',version:1,exportedAt:nowIso(),settings:state.settings,orders:localAll},null,1),'application/json');
+        localAll=localAll.filter(o=>remoteIds.has(o.id));
+      }
+    }
+    setSyncMeta({on:true,email,cursor:null,settingsAt:null});
+    setOutbox({orders:{},settings:null});
+    sync.email=email; sync.phase='connecting'; sync.msg='';
+    applyRemoteRows(rows); afterRemoteChange();
+    if(cursor) setSyncMeta({cursor});
+    queueOrders(upload);
+    const rs=await syncAdapter.pullSettings();
+    if(rs&&rs.data) applyRemoteSettings(rs); else queueSettings();
+    await startSync(); scheduleFlush(0);
+    toast(remoteCount?'Signed in. This computer now shares orders with the store.':`Store login set up. ${upload.length} order${upload.length===1?'':'s'} from this computer ${upload.length===1?'is':'are'} now shared.`);
+  }catch(e){
+    sync.msg=/fetch|network/i.test(String(e&&e.message))?'Couldn’t reach the shared store. Check the internet connection and try again.':(e&&e.message?String(e.message):'Sign-in failed. Try again.');
+  }finally{sync.busyUi=false;renderSyncUi()}
+}
+async function syncSignOut(){
+  const n=pendingCount();
+  if(!await confirmDlg({title:'Stop syncing on this computer?',body:(n?`${n} change${n===1?' hasn’t':'s haven’t'} reached the shared store yet and won’t be sent. `:'')+'This computer keeps its current orders but stops sharing them with the others.',ok:'Stop syncing',danger:!!n})) return;
+  stopLive(); clearTimeout(sync.retryTimer); clearTimeout(sync.flushTimer);
+  await syncAdapter.signOut();
+  setSyncMeta({on:false,cursor:null,settingsAt:null}); setOutbox({orders:{},settings:null});
+  sync.phase='off'; sync.msg=''; renderSyncUi(); renderBackupStatus();
+  toast('Stopped syncing on this computer.');
+}
+function syncWhen(ms){if(!ms)return '';const d=new Date(ms);return d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+function renderSyncUi(){
+  const panel=$('#syncPanel'); if(!panel) return;
+  panel.hidden=!syncAdapter; if(!syncAdapter) return;
+  const on=syncOn(), n=pendingCount(), body=$('#syncBody'), badge=$('#syncBadge');
+  const label=!on?'Off':sync.phase==='ok'?(n?'Sending…':'Synced'):sync.phase==='offline'?'Offline':sync.phase==='signedout'?'Signed out':sync.phase==='error'?'No access':'Connecting';
+  badge.textContent=label; badge.className='sync-state '+(!on?'':sync.phase==='ok'?'ok':sync.phase==='connecting'?'':'warn');
+  const form=(prefill)=>`<div class="grid2" style="max-width:560px">
+      <div class="field"><label for="sync-email">Store login email</label><input class="inp" id="sync-email" type="email" autocomplete="username" value="${esc(prefill||'')}"></div>
+      <div class="field"><label for="sync-pass">Password</label><input class="inp" id="sync-pass" type="password" autocomplete="current-password"></div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" id="syncIn" ${sync.busyUi?'disabled':''}>Sign in</button><button class="btn" id="syncCreate" ${sync.busyUi?'disabled':''}>Create store login</button></div>`;
+  const keep=document.activeElement&&body.contains(document.activeElement)?document.activeElement.id:null;
+  const vals={e:$('#sync-email')?$('#sync-email').value:null,p:$('#sync-pass')?$('#sync-pass').value:null};
+  if(!on){
+    body.innerHTML=`<p class="hint">Sign in with the store login on every computer at the counter. They then share the same orders, customers, prices and settings, and changes show up on the others within a second or two. Each computer keeps its own copy, so it keeps working if the internet drops and catches up when it’s back.</p>
+      <p class="hint">First computer: choose <b>Create store login</b>. Its orders become the shared store. Other computers: <b>Sign in</b> with the same email and password.</p>${form('')}`;
+  }else if(sync.phase==='signedout'){
+    body.innerHTML=`<p class="hint">This computer was signed out, so changes are being saved here and will sync after you sign in again.${n?` ${n} change${n===1?' is':'s are'} waiting.`:''}</p>${form(syncMeta().email)}<div><button class="btn btn-quiet" id="syncOff">Stop syncing on this computer</button></div>`;
+  }else{
+    const status=sync.phase==='ok'?(n?`Sending ${n} change${n===1?'':'s'}…`:`Everything is saved to the shared store${sync.lastOk?` (checked ${syncWhen(sync.lastOk)})`:''}.`)
+      :sync.phase==='offline'?`Can’t reach the shared store right now. This computer keeps working${n?`, and ${n} change${n===1?' is':'s are'} waiting to send`:''}. It retries on its own.`
+      :sync.phase==='error'?esc(sync.error):'Connecting…';
+    body.innerHTML=`<p class="hint">Signed in as <b>${esc(syncMeta().email||sync.email)}</b>. ${sync.live?'Live updates are on.':''}</p>
+      <p class="hint" id="syncStatus">${status}</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="syncNow">Sync now</button><button class="btn btn-quiet" id="syncOff">Stop syncing on this computer</button></div>`;
+  }
+  if(sync.msg) body.insertAdjacentHTML('beforeend',`<p class="hint" id="syncMsg" role="status" style="color:var(--text)">${esc(sync.msg)}</p>`);
+  if(vals.e!=null&&$('#sync-email')&&!$('#sync-email').value) $('#sync-email').value=vals.e;
+  if(vals.p!=null&&$('#sync-pass')) $('#sync-pass').value=vals.p;
+  if(keep&&$('#'+keep)) $('#'+keep).focus();
+  const b=id=>$('#'+id);
+  if(b('syncIn')) b('syncIn').onclick=()=>syncSignIn(false);
+  if(b('syncCreate')) b('syncCreate').onclick=()=>syncSignIn(true);
+  if(b('sync-pass')) b('sync-pass').onkeydown=e=>{if(e.key==='Enter')syncSignIn(false)};
+  if(b('syncNow')) b('syncNow').onclick=()=>{pull();scheduleFlush(0)};
+  if(b('syncOff')) b('syncOff').onclick=syncSignOut;
+  $('#syncText').textContent=on
+    ?'Orders, prices and customers sync between every computer signed in with the store login. Each computer also keeps its own copy here, so it keeps working offline. Backups are still a good idea.'
+    :'Orders, prices and customers are saved in this browser on this PC only. Clearing browsing data, switching browsers, or moving this file to a different folder can lose them, so back up regularly. A backup file also moves everything to another PC: open this app there and choose Restore.';
+  renderRailSync();
+}
+function renderRailSync(){
+  if(!syncOn()) return;
+  const n=pendingCount(), p=sync.phase;
+  const [dot,txt]=p==='ok'?(n?['local','Sending…']:['ok','Synced']):p==='offline'?['local',n?`Offline, ${n} waiting`:'Offline']:p==='signedout'?['local','Sign in to sync']:p==='error'?['local','Sync stopped']:['','Connecting'];
+  $('#railSync').innerHTML=(p==='signedout'||p==='error')
+    ?`<button class="nav-btn" id="railBackup" style="width:72px;padding:6px 2px;color:var(--today-text);background:var(--today-bg);font-size:10.5px"><span class="sync-dot local"></span>${txt}</button>`
+    :`<span class="sync-dot ${dot}"></span><span>${txt}</span>`;
+  const rb=$('#railBackup'); if(rb) rb.onclick=()=>showView('settings');
+}
+window.addEventListener('online',()=>{if(syncOn()){pull();scheduleFlush(0)}});
+let lastFocusPull=0;
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&syncOn()&&Date.now()-lastFocusPull>10000){lastFocusPull=Date.now();pull()}});
+setInterval(()=>{if(syncOn()&&!document.hidden)pull()},60000);
 
 /* ---------- order helpers ---------- */
 const CLOSE_LOCS={'Picked Up By Customer':'picked','Shipped to Customer':'shipped'};
@@ -586,6 +864,7 @@ $('#exportBtn').addEventListener('click',async()=>{
 const LS_BACKUP='pc_last_backup';
 function renderBackupStatus(){
   if(state.mode!=='local') return;
+  if(syncOn()) return renderSyncUi();
   const last=lsGet(LS_BACKUP,null), days=last?Math.floor((Date.now()-new Date(last).getTime())/864e5):null;
   const due=!last||days>=7;
   $('#backupStatus').textContent=last?`Last backup: ${new Date(last).toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'})}${days>0?` (${days} day${days===1?'':'s'} ago)`:' (today)'}.`:'No backup made yet on this PC.';
@@ -608,11 +887,13 @@ $('#restoreFile').addEventListener('change',async e=>{
   try{data=JSON.parse(await f.text())}catch(_){toast('That file isn’t a Print Counter backup.');return}
   if(!data||data.app!=='print-counter'||!Array.isArray(data.orders)||typeof data.settings!=='object'){toast('That file isn’t a Print Counter backup.');return}
   const when=data.exportedAt?new Date(data.exportedAt).toLocaleString([],{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}):'an unknown date';
-  const ok=await confirmDlg({title:'Replace everything on this PC?',body:`The backup from ${when} has ${data.orders.length} order${data.orders.length===1?'':'s'}. Restoring replaces all orders, customers, prices and settings currently on this PC.`,ok:'Restore backup',danger:true});
+  const ok=await confirmDlg({title:'Replace everything on this PC?',body:`The backup from ${when} has ${data.orders.length} order${data.orders.length===1?'':'s'}. Restoring replaces all orders, customers, prices and settings currently ${syncOn()?'on every computer that syncs with this one':'on this PC'}.`,ok:'Restore backup',danger:true});
   if(!ok) return;
+  const oldIds=localAll.map(o=>o.id);
   localAll=data.orders.filter(o=>o&&o.id);
   state.settings=normalizeSettings(data.settings);
   try{persistLocal()}catch(err){toast('Storage is full, so the backup could not be fully restored on this PC.')}
+  if(syncOn()){ queueOrders([...new Set([...oldIds,...localAll.map(o=>o.id)])]); queueSettings(); }
   applyLocalOrders(); state.archived=null; lsSet(LS_BACKUP,nowIso());
   await ensureArchived(); renderAll(); renderSettings(true); renderBackupStatus();
   toast(`Restored ${localAll.length} order${localAll.length===1?'':'s'}`);
@@ -933,7 +1214,7 @@ async function saveDraft(andPrint,after){
     const orig=JSON.parse(draftOrig);
     if(isNew){
       const maxNum=Math.max(0,...state.orders.map(o=>o.num||0),...(state.archived||[]).map(o=>o.num||0));
-      const n=Math.max(state.settings.nextNum,maxNum+1);
+      const n=await nextOrderNumber(Math.max(state.settings.nextNum,maxNum+1));
       const s=clone(state.settings); s.nextNum=n+1; await saveSettings(s);
       d.num=n; d.createdAt=nowIso(); d.stageAt=d.createdAt;
     }else if(orig.stage!==d.stage) d.stageAt=nowIso();

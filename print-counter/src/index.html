@@ -151,6 +151,10 @@ try{var pa=JSON.parse(localStorage.getItem('pc_appearance')||'{}'),r=document.do
             </div>
           </div>
         </div>
+        <div class="panel" id="syncPanel" hidden>
+          <div class="panel-head"><div><h2>Sync between computers</h2><p>Share orders live between every computer at the counter.</p></div><span class="sync-state" id="syncBadge">Off</span></div>
+          <div class="panel-body stack" id="syncBody"></div>
+        </div>
         <div class="panel">
           <div class="panel-head"><h2>Where your data is saved</h2></div>
           <div class="panel-body stack"><p class="hint" id="syncText">Checking…</p>
@@ -216,6 +220,8 @@ try{var pa=JSON.parse(localStorage.getItem('pc_appearance')||'{}'),r=document.do
 <div id="printArea"></div>
 <script><!--@JSPDF@--></script>
 <script><!--@AUTOTABLE@--></script>
+<script><!--@SUPABASE@--></script>
+<script>window.PC_SYNC_CONFIG=<!--@SYNC_CONFIG@-->;</script>
 <script>window.PC_PDF_FONTS=<!--@PDF_FONTS@-->;</script>
 <!--@DEMO_SCRIPT@-->
 <script>

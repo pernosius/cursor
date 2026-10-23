@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, BookOpen, Download, Plus, Search, Settings as Gear, Upload } from 'lucide-react';
+import { Archive, BookOpen, Download, FlaskConical, Plus, Search, Settings as Gear, Upload } from 'lucide-react';
 import { useCharacters } from '../store/characters';
 import { useUi } from '../store/ui';
 import { accentOf, armorClass, classLine, totalLevel } from '../lib/rules';
@@ -24,7 +24,7 @@ export const exportCharacters = (list: Character[], filename: string) => {
 };
 
 export default function Home() {
-  const all = useCharacters((s) => s.characters);
+  const all = useCharacters((s) => s.items);
   const add = useCharacters((s) => s.add);
   const notify = useUi((s) => s.notify);
   const navigate = useNavigate();
@@ -88,6 +88,9 @@ export default function Home() {
         <SyncPill />
         <Link to="/compendium" className="btn icon ghost" aria-label="Compendium" title="Compendium">
           <BookOpen />
+        </Link>
+        <Link to="/homebrew" className="btn icon ghost" aria-label="Homebrew" title="Homebrew">
+          <FlaskConical />
         </Link>
         <Link to="/settings" className="btn icon ghost" aria-label="Settings" title="Settings">
           <Gear />

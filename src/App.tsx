@@ -1,19 +1,23 @@
 import { useEffect } from 'react';
 import { HashRouter, Route, Routes } from 'react-router-dom';
 import { useCharacters } from './store/characters';
+import { useHomebrew } from './store/homebrew';
 import { startSync } from './sync/engine';
 import Home from './pages/Home';
 import NewCharacter from './pages/NewCharacter';
 import Sheet from './pages/Sheet';
 import Settings from './pages/Settings';
 import Compendium from './pages/Compendium';
+import Homebrew from './pages/Homebrew';
 import Toasts from './components/Toasts';
 import DiceRoller from './components/DiceRoller';
 
 export default function App() {
-  const ready = useCharacters((s) => s.ready);
+  const charactersReady = useCharacters((s) => s.ready);
+  const homebrewReady = useHomebrew((s) => s.ready);
+  const ready = charactersReady && homebrewReady;
   useEffect(() => {
-    void useCharacters.getState().load().then(startSync);
+    void Promise.all([useCharacters.getState().load(), useHomebrew.getState().load()]).then(startSync);
   }, []);
 
   return (
@@ -28,6 +32,7 @@ export default function App() {
             <Route path="/c/:id/:tab" element={<Sheet />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/compendium" element={<Compendium />} />
+            <Route path="/homebrew" element={<Homebrew />} />
             <Route path="*" element={<Home />} />
           </Routes>
         ) : null}

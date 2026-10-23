@@ -5,6 +5,7 @@ import { configure, sendSignInEmail, signInWithPassword, signOut, signUpWithPass
 import { getConfig, isBuiltInConfig } from '../sync/client';
 import { useUi, type Theme } from '../store/ui';
 import { useCharacters } from '../store/characters';
+import { useHomebrew } from '../store/homebrew';
 import { SRD_ATTRIBUTION } from '../lib/srd';
 import { cx } from '../components/ui';
 import { verifyCode } from '../sync/engine';
@@ -58,7 +59,7 @@ export default function Settings() {
 
 function SyncCard() {
   const { status, user, lastSyncedAt, error } = useSync();
-  const dirty = useCharacters((s) => s.dirty.size);
+  const dirty = useCharacters((s) => s.dirty.size) + useHomebrew((s) => s.dirty.size);
   const cfg = getConfig();
   const [editingCfg, setEditingCfg] = useState(false);
 

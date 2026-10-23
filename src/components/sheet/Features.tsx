@@ -3,7 +3,8 @@ import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { TabProps } from '../../pages/Sheet';
 import { uid } from '../../lib/id';
 import type { Feature, Reset } from '../../lib/types';
-import { FEATS } from '../../lib/srd';
+import { allFeats } from '../../lib/srd';
+import { useHomebrew } from '../../store/homebrew';
 import { useUi } from '../../store/ui';
 import { Modal, NumberInput, Pips, RichText, Switch, TextInput, cx } from '../ui';
 
@@ -11,6 +12,7 @@ const RESET_LABEL: Record<Reset, string> = { short: 'Short rest', long: 'Long re
 
 export default function Features({ c, upd }: TabProps) {
   const notify = useUi((s) => s.notify);
+  useHomebrew((s) => s.items);
   const [open, setOpen] = useState<string | null>(null);
   const [filter, setFilter] = useState('All');
   const [editing, setEditing] = useState<Feature | null>(null);
@@ -142,7 +144,7 @@ export default function Features({ c, upd }: TabProps) {
       </div>
 
       <Modal open={featPicker} onClose={() => setFeatPicker(false)} title="Add a feat">
-        {FEATS.map((f) => (
+        {allFeats().map((f) => (
           <div key={f.id} className="entry">
             <div className="entry-head" onClick={() => setOpen(open === f.id ? null : f.id)}>
               <div className="grow">

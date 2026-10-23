@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Camera, Check, Dices, Sparkles } from 'lucide-react';
-import { ABILITIES, ALIGNMENTS, CLASS_COLORS, DEFAULT_ACCENT, POINT_BUY_COST, SKILLS, STANDARD_ARRAY, fmt, mod } from '../lib/rules';
-import { BACKGROUNDS, CLASSES, SPECIES } from '../lib/srd';
+import { ABILITIES, ALIGNMENTS, CLASS_COLORS, DEFAULT_ACCENT, MULTICLASS_PROFS, POINT_BUY_COST, SKILLS, STANDARD_ARRAY, fmt, mod, multiclassProblems } from '../lib/rules';
+import { X } from 'lucide-react';
+import { CLASSES, allBackgrounds, allSpecies, subclassesFor } from '../lib/srd';
+import { useHomebrew } from '../store/homebrew';
 import { buildCharacter } from '../lib/character';
 import { roll } from '../lib/dice';
 import type { Ability, SkillId } from '../lib/types';
@@ -26,6 +28,7 @@ export default function NewCharacter() {
   const [alignment, setAlignment] = useState('');
   const [classId, setClassId] = useState('');
   const [subclass, setSubclass] = useState('');
+  const [extras, setExtras] = useState<{ classId: string; level: number; subclass: string; skills: SkillId[] }[]>([]);
   const [speciesId, setSpeciesId] = useState('');
   const [subspeciesId, setSubspeciesId] = useState('');
   const [backgroundId, setBackgroundId] = useState('');
@@ -41,8 +44,13 @@ export default function NewCharacter() {
   const [skills, setSkills] = useState<SkillId[]>([]);
 
   const cls = CLASSES.find((c) => c.id === classId);
+  useHomebrew((s) => s.items);
+  const SPECIES = allSpecies();
+  const BACKGROUNDS = allBackgrounds();
   const species = SPECIES.find((s) => s.id === speciesId);
   const bg = BACKGROUNDS.find((b) => b.id === backgroundId);
+  // Homebrew backgrounds may not list their three abilities; allow any then.
+  const bgAbilities: Ability[] = bg?.abilities.length ? bg.abilities : ABILITIES.map((a) => a.id);
   const accent = (classId && CLASS_COLORS[classId]) || DEFAULT_ACCENT;
 
   const scores: Record<Ability, number> =
@@ -56,21 +64,29 @@ export default function NewCharacter() {
   const bonuses = useMemo(() => {
     const b: Partial<Record<Ability, number>> = {};
     if (!bg) return b;
-    if (bonusMode === '111') for (const a of bg.abilities) b[a] = 1;
+    if (bonusMode === '111') for (const a of bgAbilities.slice(0, 3)) b[a] = 1;
     else {
       if (plus2) b[plus2] = 2;
       if (plus1 && plus1 !== plus2) b[plus1] = 1;
     }
     return b;
-  }, [bg, bonusMode, plus2, plus1]);
+  }, [bg, bgAbilities, bonusMode, plus2, plus1]);
 
   const bgSkills = bg?.skills ?? [];
+  const primaryLevel = level - extras.reduce((n, x) => n + x.level, 0);
+  const finalScores = Object.fromEntries(
+    ABILITIES.map((a) => [a.id, Math.min(20, scores[a.id] + (bonuses[a.id] ?? 0))]),
+  ) as Record<Ability, number>;
+  const mcProblems = extras.length
+    ? multiclassProblems(finalScores, [classId, ...extras.map((x) => x.classId)], Object.fromEntries(CLASSES.map((c) => [c.id, c.name])))
+    : [];
+  const setExtra = (i: number, p: Partial<(typeof extras)[number]>) => setExtras((xs) => xs.map((x, j) => (j === i ? { ...x, ...p } : x)));
   const skillLimit = cls?.skillChoices?.choose ?? 2;
   const skillOptions = (cls?.skillChoices?.from ?? SKILLS.map((s) => s.id)).filter((s) => !bgSkills.includes(s));
 
   const canNext = [
     name.trim().length > 0,
-    !!cls,
+    !!cls && primaryLevel >= 1,
     !!species && (!species.subspecies.length || !!subspeciesId),
     !!bg && (bonusMode === '111' || (!!plus2 && !!plus1 && plus1 !== plus2)),
     method === 'array'
@@ -78,7 +94,8 @@ export default function NewCharacter() {
       : method === 'pointbuy'
         ? pointsSpent <= 27
         : true,
-    skills.length === Math.min(skillLimit, skillOptions.length),
+    skills.length === Math.min(skillLimit, skillOptions.length) &&
+      extras.every((x) => x.skills.length === Math.min(MULTICLASS_PROFS[x.classId]?.skills ?? 0, 1)),
   ][step];
 
   const create = () => {
@@ -89,7 +106,8 @@ export default function NewCharacter() {
       level,
       alignment: alignment || undefined,
       classId,
-      subclass: level >= 3 && subclass ? subclass : undefined,
+      subclass: primaryLevel >= 3 && subclass ? subclass : undefined,
+      extraClasses: extras.map((x) => ({ classId: x.classId, level: x.level, subclass: x.level >= 3 && x.subclass ? x.subclass : undefined, skills: x.skills })),
       speciesId,
       subspeciesId: subspeciesId || undefined,
       backgroundId,
@@ -204,6 +222,7 @@ export default function NewCharacter() {
                     setClassId(c.id);
                     setSkills([]);
                     setSubclass('');
+                    setExtras((xs) => xs.filter((x) => x.classId !== c.id));
                   }}
                 >
                   <div className="t">
@@ -216,9 +235,9 @@ export default function NewCharacter() {
                 </button>
               ))}
             </div>
-            {cls && level >= 3 && (
+            {cls && primaryLevel >= 3 && (
               <label className="field">
-                <span>Subclass</span>
+                <span>{cls.name} subclass</span>
                 <input
                   className="input"
                   list="subclass-options"
@@ -227,14 +246,83 @@ export default function NewCharacter() {
                   onChange={(e) => setSubclass(e.target.value)}
                 />
                 <datalist id="subclass-options">
-                  {cls.subclasses.map((s) => (
+                  {subclassesFor(cls.id).map((s) => (
                     <option key={s.id} value={s.name} />
                   ))}
                 </datalist>
                 <span className="faint tiny" style={{ fontWeight: 400 }}>
-                  Only SRD subclasses are listed; type any other subclass name.
+                  Only SRD and homebrew subclasses are listed; type any other subclass name.
                 </span>
               </label>
+            )}
+            {cls && level >= 2 && (
+              <div className="card">
+                <div className="card-title">
+                  <h3>Multiclass</h3>
+                  <span className="spacer" />
+                  <span className="faint tiny">optional</span>
+                </div>
+                <p className="small muted" style={{ marginBottom: 10 }}>
+                  Split your {level} levels across classes. {cls.name} is your starting class
+                  {extras.length ? ` (level ${primaryLevel})` : ''}; it sets your saving throws and full proficiencies.
+                </p>
+                <div className="col" style={{ gap: 8 }}>
+                  {extras.map((x, i) => {
+                    const d = CLASSES.find((c) => c.id === x.classId)!;
+                    return (
+                      <div key={x.classId} className="entry" style={{ padding: 10 }}>
+                        <div className="row wrap">
+                          <span className="pick" style={{ all: 'unset', '--accent': CLASS_COLORS[x.classId] } as React.CSSProperties}>
+                            <span className="swatch" />
+                          </span>
+                          <b className="grow">{d.name}</b>
+                          <button className="btn icon sm" aria-label="Fewer levels" disabled={x.level <= 1} onClick={() => setExtra(i, { level: x.level - 1 })}>
+                            −
+                          </button>
+                          <b className="num" style={{ minWidth: 22, textAlign: 'center' }}>{x.level}</b>
+                          <button className="btn icon sm" aria-label="More levels" disabled={primaryLevel <= 1} onClick={() => setExtra(i, { level: x.level + 1 })}>
+                            +
+                          </button>
+                          <button className="btn icon sm ghost" aria-label={`Remove ${d.name}`} onClick={() => setExtras((xs) => xs.filter((_, j) => j !== i))}>
+                            <X />
+                          </button>
+                        </div>
+                        {x.level >= 3 && (
+                          <>
+                            <input
+                              className="input"
+                              style={{ marginTop: 8 }}
+                              list={`sub-${x.classId}`}
+                              placeholder={`${d.name} subclass`}
+                              value={x.subclass}
+                              onChange={(e) => setExtra(i, { subclass: e.target.value })}
+                            />
+                            <datalist id={`sub-${x.classId}`}>
+                              {subclassesFor(x.classId).map((s) => (
+                                <option key={s.id} value={s.name} />
+                              ))}
+                            </datalist>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {primaryLevel > 1 && (
+                    <select
+                      className="select"
+                      value=""
+                      onChange={(e) => e.target.value && setExtras((xs) => [...xs, { classId: e.target.value, level: 1, subclass: '', skills: [] }])}
+                    >
+                      <option value="">+ Add another class</option>
+                      {CLASSES.filter((c) => c.id !== classId && !extras.some((x) => x.classId === c.id)).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -324,7 +412,7 @@ export default function NewCharacter() {
                         <span>{label}</span>
                         <select className="select" value={val} onChange={(e) => set(e.target.value as Ability)}>
                           <option value="">Choose…</option>
-                          {bg.abilities.map((a) => (
+                          {bgAbilities.map((a) => (
                             <option key={a} value={a}>
                               {ABILITIES.find((x) => x.id === a)!.name}
                             </option>
@@ -335,7 +423,7 @@ export default function NewCharacter() {
                   </div>
                 ) : (
                   <p className="muted small">
-                    +1 to {bg.abilities.map((a) => ABILITIES.find((x) => x.id === a)!.name).join(', ')}.
+                    +1 to {bgAbilities.slice(0, 3).map((a) => ABILITIES.find((x) => x.id === a)!.name).join(', ')}.
                   </p>
                 )}
                 <hr className="divider" />
@@ -448,6 +536,12 @@ export default function NewCharacter() {
               })}
             </div>
             {cls && <p className="small muted">{cls.name} primary ability: {cls.primary}.</p>}
+            {mcProblems.length > 0 && (
+              <p className="small" style={{ color: 'var(--warn)' }}>
+                Multiclassing needs a 13 in each class's main ability: {mcProblems.join('; ')}. You can still continue if your DM allows
+                it.
+              </p>
+            )}
           </div>
         )}
 
@@ -482,6 +576,31 @@ export default function NewCharacter() {
                 );
               })}
             </div>
+            {extras
+              .filter((x) => (MULTICLASS_PROFS[x.classId]?.skills ?? 0) > 0)
+              .map((x) => {
+                const d = CLASSES.find((c) => c.id === x.classId)!;
+                const i = extras.indexOf(x);
+                const taken = new Set<SkillId>([...bgSkills, ...skills, ...extras.flatMap((y) => (y === x ? [] : y.skills))]);
+                return (
+                  <div key={x.classId} className="field">
+                    <span>One {d.name} skill (multiclass)</span>
+                    <div className="chips">
+                      {(d.skillChoices?.from ?? SKILLS.map((s) => s.id))
+                        .filter((sk) => !taken.has(sk))
+                        .map((sk) => (
+                          <button
+                            key={sk}
+                            className={cx('chip', x.skills.includes(sk) && 'on')}
+                            onClick={() => setExtra(i, { skills: x.skills.includes(sk) ? [] : [sk] })}
+                          >
+                            {SKILLS.find((s) => s.id === sk)?.name}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>

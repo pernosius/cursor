@@ -107,7 +107,33 @@ export const FEATS = featsData as unknown as SrdFeat[];
 export const CONDITIONS = conditionsData as unknown as SrdCondition[];
 
 export const classById = (id: string) => CLASSES.find((c) => c.id === id);
-export const speciesById = (id: string) => SPECIES.find((s) => s.id === id || s.name === id);
+
+// ---- Homebrew registry ----------------------------------------------------
+// The homebrew store pushes its entries here (already converted to SRD shapes)
+// so plain functions like buildCharacter can see them without React.
+
+type WithSource<T> = T & { source?: string };
+const extra = {
+  species: [] as WithSource<SrdSpecies>[],
+  backgrounds: [] as WithSource<SrdBackground>[],
+  feats: [] as WithSource<SrdFeat>[],
+  subclasses: {} as Record<string, WithSource<SrdSubclass>[]>,
+  spells: [] as WithSource<SrdSpell>[],
+  items: [] as WithSource<SrdItem>[],
+};
+export const setHomebrewContent = (next: typeof extra) => Object.assign(extra, next);
+
+export const allSpecies = (): WithSource<SrdSpecies>[] => [...SPECIES, ...extra.species];
+export const allBackgrounds = (): WithSource<SrdBackground>[] => [...BACKGROUNDS, ...extra.backgrounds];
+export const allFeats = (): WithSource<SrdFeat>[] => [...FEATS, ...extra.feats];
+export const subclassesFor = (classId: string): WithSource<SrdSubclass>[] => [
+  ...(classById(classId)?.subclasses ?? []),
+  ...(extra.subclasses[classId] ?? []),
+];
+export const homebrewSpells = () => extra.spells;
+export const homebrewItems = () => extra.items;
+
+export const speciesById = (id: string) => allSpecies().find((s) => s.id === id || s.name === id);
 
 // Spells and items are large, so they are split into their own chunks and
 // loaded on first use.

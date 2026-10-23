@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { RealtimeChannel, User } from '@supabase/supabase-js';
-import type { Character } from '../lib/types';
-import { flushWrites, metaDel, metaGet, metaSet, onLocalChange, useCharacters } from '../store/characters';
+import { flushAll, metaDel, metaGet, metaSet, onLocalChange, syncedStores, type SyncedRecord, type SyncedStore } from '../store/synced';
+import '../store/characters';
+import '../store/homebrew';
 import { saveConfig, supabase, type SupabaseConfig } from './client';
 
 export type SyncStatus = 'unconfigured' | 'signed-out' | 'syncing' | 'synced' | 'offline' | 'error';
@@ -23,56 +24,58 @@ export const useSync = create<SyncState>(() => ({
 interface Row {
   id: string;
   user_id?: string;
-  data: Character;
+  data: SyncedRecord & Record<string, unknown>;
   updated_at: number;
   deleted: boolean;
   server_updated_at: string;
 }
 
-const CURSOR_KEY = 'pullCursor';
+// Characters kept their original cursor key; other tables get their own.
+const cursorKey = (table: string) => (table === 'characters' ? 'pullCursor' : `pullCursor:${table}`);
 let running: Promise<void> | null = null;
 let again = false;
 let pushTimer: ReturnType<typeof setTimeout> | undefined;
-let channel: RealtimeChannel | null = null;
+let channels: RealtimeChannel[] = [];
 
 const setStatus = (status: SyncStatus, error: string | null = null) => useSync.setState({ status, error });
 
-const pull = async () => {
-  const sb = supabase()!;
-  const cursor = await metaGet<string>(CURSOR_KEY);
-  let q = sb.from('characters').select('id,data,updated_at,deleted,server_updated_at').order('server_updated_at');
-  // Re-read a small overlap window so rows committed out of order are never missed.
-  if (cursor) q = q.gt('server_updated_at', new Date(new Date(cursor).getTime() - 5000).toISOString());
-  const { data, error } = await q.returns<Row[]>();
-  if (error) throw error;
-  if (!data.length) return;
-  useCharacters.getState().applyRemote(data.map(rowToCharacter));
-  await metaSet(CURSOR_KEY, data[data.length - 1].server_updated_at);
-};
-
-const rowToCharacter = (r: Pick<Row, 'id' | 'data' | 'updated_at' | 'deleted'>): Character => ({
+const rowToRecord = (r: Pick<Row, 'id' | 'data' | 'updated_at' | 'deleted'>): SyncedRecord => ({
   ...r.data,
   id: r.id,
   updatedAt: Number(r.updated_at),
   deleted: r.deleted || r.data.deleted,
 });
 
-const push = async (userId: string) => {
-  const { characters, dirty } = useCharacters.getState();
-  const batch = [...dirty].map((id) => characters[id]).filter(Boolean);
+const pull = async (store: SyncedStore<SyncedRecord>) => {
+  const sb = supabase()!;
+  const key = cursorKey(store.table);
+  const cursor = await metaGet<string>(key);
+  let q = sb.from(store.table).select('id,data,updated_at,deleted,server_updated_at').order('server_updated_at');
+  // Re-read a small overlap window so rows committed out of order are never missed.
+  if (cursor) q = q.gt('server_updated_at', new Date(new Date(cursor).getTime() - 5000).toISOString());
+  const { data, error } = await q.returns<Row[]>();
+  if (error) throw error;
+  if (!data.length) return;
+  store.use.getState().applyRemote(data.map(rowToRecord));
+  await metaSet(key, data[data.length - 1].server_updated_at);
+};
+
+const push = async (store: SyncedStore<SyncedRecord>, userId: string) => {
+  const { items, dirty } = store.use.getState();
+  const batch = [...dirty].map((id) => items[id]).filter(Boolean);
   if (!batch.length) return;
-  const rows = batch.map((c) => ({
-    id: c.id,
+  const rows = batch.map((x) => ({
+    id: x.id,
     user_id: userId,
-    data: c,
-    updated_at: c.updatedAt,
-    deleted: !!c.deleted,
+    data: x,
+    updated_at: x.updatedAt,
+    deleted: !!x.deleted,
   }));
   for (let i = 0; i < rows.length; i += 50) {
-    const { error } = await supabase()!.from('characters').upsert(rows.slice(i, i + 50));
+    const { error } = await supabase()!.from(store.table).upsert(rows.slice(i, i + 50));
     if (error) throw error;
   }
-  useCharacters.getState().markClean(batch.map((c) => ({ id: c.id, updatedAt: c.updatedAt })));
+  store.use.getState().markClean(batch.map((x) => ({ id: x.id, updatedAt: x.updatedAt })));
 };
 
 /** Pulls remote changes, then pushes local ones. Safe to call any time. */
@@ -90,9 +93,11 @@ export const syncNow = async (): Promise<void> => {
   running = (async () => {
     setStatus('syncing');
     try {
-      await flushWrites();
-      await pull();
-      await push(user.id);
+      await flushAll();
+      for (const store of syncedStores) {
+        await pull(store);
+        await push(store, user.id);
+      }
       useSync.setState({ status: 'synced', error: null, lastSyncedAt: Date.now() });
     } catch (e) {
       const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
@@ -114,18 +119,20 @@ const schedulePush = () => {
 };
 
 const subscribeRealtime = (userId: string) => {
-  channel?.unsubscribe();
-  channel = supabase()!
-    .channel(`characters:${userId}`)
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'characters', filter: `user_id=eq.${userId}` },
-      (payload) => {
-        const row = payload.new as Row | undefined;
-        if (row?.id && row.data) useCharacters.getState().applyRemote([rowToCharacter(row)]);
-      },
-    )
-    .subscribe();
+  channels.forEach((c) => c.unsubscribe());
+  channels = syncedStores.map((store) =>
+    supabase()!
+      .channel(`${store.table}:${userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: store.table, filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const row = payload.new as Row | undefined;
+          if (row?.id && row.data) store.use.getState().applyRemote([rowToRecord(row)]);
+        },
+      )
+      .subscribe(),
+  );
 };
 
 let started = false;
@@ -135,8 +142,8 @@ export const startSync = async () => {
   const sb = supabase();
   authUnsub?.();
   authUnsub = null;
-  channel?.unsubscribe();
-  channel = null;
+  channels.forEach((c) => c.unsubscribe());
+  channels = [];
   if (!sb) {
     useSync.setState({ status: 'unconfigured', user: null });
     return;
@@ -150,9 +157,11 @@ export const startSync = async () => {
       // A fresh sign-in: push everything on this device, pull everything from the cloud.
       const lastUser = await metaGet<string>('userId');
       if (lastUser !== user.id) {
-        await metaDel(CURSOR_KEY);
+        for (const store of syncedStores) {
+          await metaDel(cursorKey(store.table));
+          store.use.getState().markAllDirty();
+        }
         await metaSet('userId', user.id);
-        useCharacters.getState().markAllDirty();
       }
       subscribeRealtime(user.id);
     }
@@ -214,8 +223,8 @@ export const signUpWithPassword = async (email: string, password: string) => {
 
 export const signOut = async () => {
   await supabase()?.auth.signOut();
-  channel?.unsubscribe();
-  channel = null;
+  channels.forEach((c) => c.unsubscribe());
+  channels = [];
   useSync.setState({ user: null, status: 'signed-out', lastSyncedAt: null });
 };
 

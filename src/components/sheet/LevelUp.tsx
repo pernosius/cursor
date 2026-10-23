@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react';
 import { Dices, TrendingUp } from 'lucide-react';
 import type { Character } from '../../lib/types';
 import type { Upd } from '../../pages/Sheet';
-import { CLASSES, classById } from '../../lib/srd';
-import { CLASS_COLORS, mod, profBonus, totalLevel } from '../../lib/rules';
+import { CLASSES, classById, subclassesFor } from '../../lib/srd';
+import { useHomebrew } from '../../store/homebrew';
+import { CLASS_COLORS, MULTICLASS_PROFS, SKILLS, mod, multiclassProblems, profBonus, totalLevel } from '../../lib/rules';
+import type { SkillId } from '../../lib/types';
 import { applyLevelUp, classFeaturesAt } from '../../lib/character';
 import { roll } from '../../lib/dice';
 import { useUi } from '../../store/ui';
@@ -13,11 +15,13 @@ export default function LevelUp({
   open, onClose, c, upd, accent,
 }: { open: boolean; onClose: () => void; c: Character; upd: Upd; accent: string }) {
   const notify = useUi((s) => s.notify);
+  useHomebrew((s) => s.items);
   const primary = [...c.classes].sort((a, b) => b.level - a.level)[0];
   const [classId, setClassId] = useState(primary?.id ?? '');
   const [hpMode, setHpMode] = useState<'avg' | 'roll'>('avg');
   const [rolled, setRolled] = useState<number | null>(null);
   const [subclass, setSubclass] = useState('');
+  const [mcSkills, setMcSkills] = useState<SkillId[]>([]);
 
   const def = classById(classId);
   const existing = c.classes.find((x) => x.id === classId);
@@ -26,6 +30,12 @@ export default function LevelUp({
   const conMod = mod(c.abilities.con);
   const die = def?.hitDie ?? 8;
   const needsSub = !!def && newLevel >= 3 && !existing?.subclass;
+  const multiclassing = !!def && !existing && c.classes.length > 0;
+  const mp = multiclassing ? MULTICLASS_PROFS[def!.id] : undefined;
+  const problems = multiclassing
+    ? multiclassProblems(c.abilities, [...c.classes.map((x) => x.id), def!.id], Object.fromEntries(CLASSES.map((x) => [x.id, x.name])))
+    : [];
+  const skillOptions = (def?.skillChoices?.from ?? SKILLS.map((x) => x.id)).filter((x) => !c.skills[x]);
   const hpGain = Math.max(1, (hpMode === 'avg' ? die / 2 + 1 : (rolled ?? die / 2 + 1)) + conMod);
 
   const preview = useMemo(() => {
@@ -38,10 +48,11 @@ export default function LevelUp({
 
   const confirm = () => {
     if (!def || total > 20) return;
-    upd((x) => applyLevelUp(x, { classId: def.id, hpGain, subclass: needsSub && subclass ? subclass : undefined }));
+    upd((x) => applyLevelUp(x, { classId: def.id, hpGain, subclass: needsSub && subclass ? subclass : undefined, skills: mcSkills }));
     notify(`${c.name} reached level ${total}!`);
     setRolled(null);
     setSubclass('');
+    setMcSkills([]);
     onClose();
   };
 
@@ -67,7 +78,14 @@ export default function LevelUp({
         <div className="col" style={{ gap: 16 }}>
           <label className="field">
             <span>Class</span>
-            <select className="select" value={classId} onChange={(e) => setClassId(e.target.value)}>
+            <select
+              className="select"
+              value={classId}
+              onChange={(e) => {
+                setClassId(e.target.value);
+                setMcSkills([]);
+              }}
+            >
               {!classId && <option value="">Choose…</option>}
               {c.classes.map((x) => (
                 <option key={x.id} value={x.id}>
@@ -84,6 +102,42 @@ export default function LevelUp({
             </select>
           </label>
 
+          {multiclassing && (
+            <div className="card tight" style={{ boxShadow: 'none' }}>
+              <div className="upper" style={{ marginBottom: 6 }}>Multiclassing into {def!.name}</div>
+              {problems.length > 0 ? (
+                <p className="small" style={{ color: 'var(--warn)', marginBottom: 8 }}>
+                  By the rules you can't yet: {problems.join('; ')}. You can still continue if your DM allows it.
+                </p>
+              ) : (
+                <p className="small" style={{ color: 'var(--success)', marginBottom: 8 }}>You meet the ability score requirements.</p>
+              )}
+              <p className="small muted">
+                You gain:{' '}
+                {[...mp!.armor, ...mp!.weapons, ...mp!.tools, mp!.instrument ? 'one Musical Instrument' : '', mp!.skills ? `${mp!.skills} skill` : '']
+                  .filter(Boolean)
+                  .join(', ') || 'no extra proficiencies'}
+                . Saving throw proficiencies don't carry over when multiclassing.
+              </p>
+              {mp!.skills > 0 && (
+                <div className="chips" style={{ marginTop: 8 }}>
+                  {skillOptions.map((sk) => {
+                    const on = mcSkills.includes(sk);
+                    return (
+                      <button
+                        key={sk}
+                        className={cx('chip', on && 'on')}
+                        onClick={() => setMcSkills(on ? mcSkills.filter((x) => x !== sk) : [...mcSkills, sk].slice(-mp!.skills))}
+                      >
+                        {SKILLS.find((x) => x.id === sk)?.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {needsSub && (
             <label className="field">
               <span>Choose a subclass</span>
@@ -95,7 +149,7 @@ export default function LevelUp({
                 onChange={(e) => setSubclass(e.target.value)}
               />
               <datalist id="levelup-subclasses">
-                {def!.subclasses.map((s) => (
+                {subclassesFor(def!.id).map((s) => (
                   <option key={s.id} value={s.name} />
                 ))}
               </datalist>

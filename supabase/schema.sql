@@ -41,3 +41,32 @@ begin
   alter publication supabase_realtime add table public.characters;
 exception when duplicate_object then null;
 end $$;
+
+-- Homebrew library: your own spells, species, subclasses, feats, backgrounds and items.
+create table if not exists public.homebrew (
+  id uuid primary key,
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  data jsonb not null,
+  updated_at bigint not null,
+  deleted boolean not null default false,
+  server_updated_at timestamptz not null default now()
+);
+
+create index if not exists homebrew_user_sync_idx on public.homebrew (user_id, server_updated_at);
+
+alter table public.homebrew enable row level security;
+
+drop policy if exists "Homebrew is private to its owner" on public.homebrew;
+create policy "Homebrew is private to its owner" on public.homebrew
+  for all using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+drop trigger if exists homebrew_before_write on public.homebrew;
+create trigger homebrew_before_write
+  before insert or update on public.homebrew
+  for each row execute function public.characters_before_write();
+
+do $$
+begin
+  alter publication supabase_realtime add table public.homebrew;
+exception when duplicate_object then null;
+end $$;

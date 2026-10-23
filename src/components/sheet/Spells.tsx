@@ -278,7 +278,7 @@ export default function Spells({ c, upd }: TabProps) {
         ))}
         <div className="row wrap">
           <button className="btn sm soft" onClick={() => setAdding(true)}>
-            <BookOpen /> Add from SRD
+            <BookOpen /> Add spells
           </button>
           <button
             className="btn sm"

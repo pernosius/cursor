@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { ItemBrowser, SpellBrowser } from '../components/CompendiumList';
-import { CONDITIONS, FEATS } from '../lib/srd';
+import { CONDITIONS, allFeats } from '../lib/srd';
+import { useHomebrew } from '../store/homebrew';
 import { RichText, cx } from '../components/ui';
 
 type Tab = 'spells' | 'items' | 'feats' | 'conditions';
@@ -11,6 +12,7 @@ export default function Compendium() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('spells');
   const [open, setOpen] = useState<string | null>(null);
+  useHomebrew((s) => s.items);
   return (
     <div className="page" style={{ maxWidth: 860 }}>
       <header className="topbar">
@@ -18,6 +20,9 @@ export default function Compendium() {
           <ArrowLeft />
         </button>
         <h2 className="display grow" style={{ fontSize: 26 }}>Compendium</h2>
+        <button className="btn sm" onClick={() => navigate('/homebrew')}>
+          Your homebrew
+        </button>
       </header>
       <div className="seg" style={{ marginBottom: 16 }}>
         {(['spells', 'items', 'feats', 'conditions'] as Tab[]).map((t) => (
@@ -30,7 +35,7 @@ export default function Compendium() {
         {tab === 'spells' && <SpellBrowser />}
         {tab === 'items' && <ItemBrowser />}
         {(tab === 'feats' || tab === 'conditions') &&
-          (tab === 'feats' ? FEATS : CONDITIONS).map((f) => (
+          (tab === 'feats' ? allFeats() : CONDITIONS).map((f) => (
             <div key={f.id} className="entry">
               <div className="entry-head" onClick={() => setOpen(open === f.id ? null : f.id)}>
                 <div className="grow">

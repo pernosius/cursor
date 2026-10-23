@@ -4,7 +4,8 @@ import { Archive, ArchiveRestore, Camera, Trash2, X } from 'lucide-react';
 import type { Character } from '../../lib/types';
 import type { Upd } from '../../pages/Sheet';
 import { ALIGNMENTS, CLASS_COLORS, XP_TABLE, computeSlots, totalLevel } from '../../lib/rules';
-import { BACKGROUNDS, CLASSES, SPECIES, classById } from '../../lib/srd';
+import { CLASSES, allBackgrounds, allSpecies, classById, subclassesFor } from '../../lib/srd';
+import { useHomebrew } from '../../store/homebrew';
 import { refreshTrackers } from '../../lib/character';
 import { useCharacters } from '../../store/characters';
 import { Avatar, Confirm, Modal, NumberInput, TextInput, cx, resizeImage } from '../ui';
@@ -16,7 +17,8 @@ export default function EditDetails({
   const remove = useCharacters((s) => s.remove);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const set = (p: Partial<Character>) => upd((x) => ({ ...x, ...p }));
-  const species = SPECIES.find((s) => s.name === c.species);
+  useHomebrew((s) => s.items);
+  const species = allSpecies().find((s) => s.name === c.species);
   const nextXp = XP_TABLE[Math.min(19, totalLevel(c))];
 
   const setClasses = (classes: Character['classes']) =>
@@ -67,7 +69,7 @@ export default function EditDetails({
             <span>Species</span>
             <input className="input" list="species-list" value={c.species} onChange={(e) => set({ species: e.target.value })} />
             <datalist id="species-list">
-              {SPECIES.map((s) => (
+              {allSpecies().map((s) => (
                 <option key={s.id} value={s.name} />
               ))}
             </datalist>
@@ -85,7 +87,7 @@ export default function EditDetails({
             <span>Background</span>
             <input className="input" list="bg-list" value={c.background} onChange={(e) => set({ background: e.target.value })} />
             <datalist id="bg-list">
-              {BACKGROUNDS.map((b) => (
+              {allBackgrounds().map((b) => (
                 <option key={b.id} value={b.name} />
               ))}
             </datalist>
@@ -137,7 +139,7 @@ export default function EditDetails({
                   onChange={(e) => setClasses(c.classes.map((x, j) => (j === i ? { ...x, subclass: e.target.value || undefined } : x)))}
                 />
                 <datalist id={`sub-${cl.id}`}>
-                  {classById(cl.id)?.subclasses.map((s) => (
+                  {subclassesFor(cl.id).map((s) => (
                     <option key={s.id} value={s.name} />
                   ))}
                 </datalist>

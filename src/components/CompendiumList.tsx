@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, Plus, Search } from 'lucide-react';
-import { CLASSES, loadItems, loadSpells, type SrdItem, type SrdSpell } from '../lib/srd';
+import { CLASSES, homebrewItems, homebrewSpells, loadItems, loadSpells, type SrdItem, type SrdSpell } from '../lib/srd';
+import { useHomebrew } from '../store/homebrew';
 import { RichText, cx } from './ui';
 
 const ITEM_CATS = ['Weapon', 'Armor', 'Gear', 'Tool', 'Ammunition', 'Magic Item', 'Mount & Vehicle'];
@@ -54,16 +55,19 @@ export function SpellBrowser({
   const [level, setLevel] = useState<number | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => void loadSpells().then(setSpells), []);
+  const hbItems = useHomebrew((s) => s.items);
 
   const list = useMemo(() => {
     const n = q.trim().toLowerCase();
-    return (spells ?? []).filter(
+    const all = spells ? [...spells, ...homebrewSpells()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)) : [];
+    return all.filter(
       (s) =>
         (!cls || s.classes.includes(cls)) &&
         (level == null || s.level === level) &&
         (!n || s.name.toLowerCase().includes(n) || s.school.toLowerCase().includes(n)),
     );
-  }, [spells, q, cls, level]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spells, hbItems, q, cls, level]);
 
   return (
     <div className="col" style={{ gap: 12 }}>
@@ -100,6 +104,7 @@ export function SpellBrowser({
                     {levelName(s.level)} · {s.school}
                     {s.concentration ? ' · Concentration' : ''}
                     {s.ritual ? ' · Ritual' : ''}
+                    {'source' in s ? ` · ${(s as { source: string }).source}` : ''}
                   </div>
                 </div>
                 {onPick && (
@@ -141,13 +146,16 @@ export function ItemBrowser({ onPick, defaultCategory }: { onPick?: (i: SrdItem)
   const [cat, setCat] = useState(defaultCategory ?? '');
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => void loadItems().then(setItems), []);
+  const hbItems = useHomebrew((s) => s.items);
 
   const list = useMemo(() => {
     const n = q.trim().toLowerCase();
-    return (items ?? []).filter(
+    const all = items ? [...items, ...homebrewItems()].sort((a, b) => a.name.localeCompare(b.name)) : [];
+    return all.filter(
       (i) => (!cat || i.category === cat) && (!n || i.name.toLowerCase().includes(n) || i.sub.toLowerCase().includes(n)),
     );
-  }, [items, q, cat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, hbItems, q, cat]);
 
   return (
     <div className="col" style={{ gap: 12 }}>
@@ -168,7 +176,9 @@ export function ItemBrowser({ onPick, defaultCategory }: { onPick?: (i: SrdItem)
             <div className="entry-head" onClick={() => setOpen(open === i.id ? null : i.id)}>
               <div className="grow">
                 <div className="title">{i.name}</div>
-                <div className="faint tiny">{[i.category, i.sub, i.rarity].filter(Boolean).join(' · ')}</div>
+                <div className="faint tiny">
+                  {[i.category, i.sub, i.rarity, (i as { source?: string }).source].filter(Boolean).join(' · ')}
+                </div>
               </div>
               {onPick && (
                 <button

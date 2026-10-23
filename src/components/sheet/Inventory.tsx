@@ -182,7 +182,7 @@ export default function Inventory({ c, upd }: TabProps) {
         })}
         <div className="row wrap" style={{ marginTop: 12 }}>
           <button className="btn sm soft" onClick={() => setAdding(true)}>
-            <BookOpen /> Add from SRD
+            <BookOpen /> Add items
           </button>
           <button className="btn sm" onClick={() => setEditing({ id: uid(), name: '', qty: 1, weight: 0 })}>
             <Plus /> Custom item

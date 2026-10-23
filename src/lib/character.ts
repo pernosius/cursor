@@ -1,7 +1,7 @@
 import type { Ability, Character, ClassEntry, Feature, SkillId } from './types';
 import { uid } from './id';
-import { BACKGROUNDS, FEATS, classById, speciesById } from './srd';
-import { ABILITIES, SKILLS, computeSlots, mod } from './rules';
+import { allBackgrounds, allFeats, classById, speciesById, subclassesFor } from './srd';
+import { ABILITIES, MULTICLASS_PROFS, SKILLS, computeSlots, mergeList, mod } from './rules';
 
 const blankRecord = <K extends string, V>(keys: readonly K[], v: V) =>
   Object.fromEntries(keys.map((k) => [k, v])) as Record<K, V>;
@@ -110,7 +110,7 @@ export const classFeaturesAt = (entry: ClassEntry, level: number): Feature[] => 
     if (/subclass$/i.test(f.name) && entry.subclass) continue;
     out.push({ ...feature(f.name, `${def.name} ${level}`, f.desc), classId: def.id });
   }
-  const sub = def.subclasses.find((s) => s.name === entry.subclass);
+  const sub = subclassesFor(def.id).find((s) => s.name === entry.subclass);
   for (const f of sub?.features.filter((x) => x.level === level) ?? []) {
     out.push({ ...feature(f.name, `${sub!.name} ${level}`, f.desc), classId: def.id });
   }
@@ -129,6 +129,8 @@ export interface CreateChoices {
   /** Background ability bonuses, e.g. { str: 2, con: 1 } */
   bonuses: Partial<Record<Ability, number>>;
   skills: SkillId[];
+  /** Extra classes when starting above 1st level; their levels come out of `level`. */
+  extraClasses?: { classId: string; level: number; subclass?: string; skills?: SkillId[] }[];
   alignment?: string;
   campaign?: string;
   portrait?: string;
@@ -138,7 +140,7 @@ export const buildCharacter = (ch: CreateChoices): Character => {
   const c = blankCharacter();
   const cls = classById(ch.classId)!;
   const sp = speciesById(ch.speciesId);
-  const bg = BACKGROUNDS.find((b) => b.id === ch.backgroundId);
+  const bg = allBackgrounds().find((b) => b.id === ch.backgroundId);
   const level = Math.max(1, Math.min(20, ch.level));
 
   c.name = ch.name.trim() || 'Unnamed Hero';
@@ -155,11 +157,19 @@ export const buildCharacter = (ch: CreateChoices): Character => {
   for (const s of cls.saves) c.saves[s] = true;
   for (const s of [...ch.skills, ...(bg?.skills ?? [])]) c.skills[s] = 1;
 
-  const entry: ClassEntry = { id: cls.id, name: cls.name, level, hitDie: cls.hitDie, subclass: ch.subclass };
-  c.classes = [entry];
-  // 2024 fixed HP: max die at level 1, then the rounded-up average.
+  const extras = (ch.extraClasses ?? [])
+    .map((x) => ({ ...x, def: classById(x.classId) }))
+    .filter((x) => x.def && x.level > 0 && x.classId !== cls.id);
+  const primaryLevel = Math.max(1, level - extras.reduce((n, x) => n + x.level, 0));
+  const entry: ClassEntry = { id: cls.id, name: cls.name, level: primaryLevel, hitDie: cls.hitDie, subclass: ch.subclass };
+  c.classes = [
+    entry,
+    ...extras.map((x) => ({ id: x.def!.id, name: x.def!.name, level: x.level, hitDie: x.def!.hitDie, subclass: x.subclass })),
+  ];
+  // 2024 fixed HP: max die at 1st level of your first class, then the rounded-up average.
   const conMod = mod(c.abilities.con);
-  const maxHp = cls.hitDie + conMod + (level - 1) * (cls.hitDie / 2 + 1 + conMod);
+  let maxHp = cls.hitDie + conMod + (primaryLevel - 1) * (cls.hitDie / 2 + 1 + conMod);
+  for (const x of c.classes.slice(1)) maxHp += x.level * (x.hitDie / 2 + 1 + conMod);
   c.hp = { current: Math.max(1, maxHp), max: Math.max(1, maxHp), temp: 0 };
 
   const { slots, pact } = computeSlots(c.classes);
@@ -171,6 +181,14 @@ export const buildCharacter = (ch: CreateChoices): Character => {
   c.proficiencies.armor = profs.filter((p) => /armor|shield/i.test(p)).join(', ');
   c.proficiencies.weapons = profs.filter((p) => /weapon/i.test(p)).join(', ');
   c.proficiencies.tools = [...profs.filter((p) => !/armor|shield|weapon/i.test(p)), ...(bg?.tools ?? [])].join(', ');
+  for (const x of extras) {
+    const mp = MULTICLASS_PROFS[x.classId];
+    if (!mp) continue;
+    c.proficiencies.armor = mergeList(c.proficiencies.armor, mp.armor);
+    c.proficiencies.weapons = mergeList(c.proficiencies.weapons, mp.weapons);
+    c.proficiencies.tools = mergeList(c.proficiencies.tools, mp.tools);
+    for (const sk of x.skills ?? []) c.skills[sk] = 1;
+  }
 
   if (sp) {
     for (const t of sp.traits) c.features.push(feature(t.name, sp.name, t.desc));
@@ -179,11 +197,12 @@ export const buildCharacter = (ch: CreateChoices): Character => {
     const dv = sp.traits.find((t) => /darkvision/i.test(t.name));
     if (dv) c.defenses.senses = dv.name;
   }
-  if (bg?.featId) {
-    const feat = FEATS.find((f) => f.id === bg.featId);
-    if (feat) c.features.push(feature(bg.feat ?? feat.name, `${bg.name} background`, feat.desc));
+  if (bg?.feat) {
+    const featName = bg.feat.replace(/\s*\(.*\)$/, '');
+    const feat = allFeats().find((f) => f.id === bg.featId || f.name.toLowerCase() === featName.toLowerCase());
+    c.features.push(feature(bg.feat, `${bg.name} background`, feat?.desc ?? ''));
   }
-  for (let l = 1; l <= level; l++) c.features.push(...classFeaturesAt(entry, l));
+  for (const cl of c.classes) for (let l = 1; l <= cl.level; l++) c.features.push(...classFeaturesAt(cl, l));
   return refreshTrackers(c);
 };
 
@@ -191,13 +210,15 @@ export interface LevelUpPlan {
   classId: string;
   hpGain: number;
   subclass?: string;
-  newClass?: boolean;
+  /** Skills picked when multiclassing into a class that grants one */
+  skills?: SkillId[];
 }
 
 export const applyLevelUp = (c: Character, plan: LevelUpPlan): Character => {
   const def = classById(plan.classId);
   const classes = c.classes.map((x) => ({ ...x }));
   let entry = classes.find((x) => x.id === plan.classId);
+  const multiclassing = !entry && classes.length > 0;
   if (!entry) {
     entry = { id: plan.classId, name: def?.name ?? plan.classId, level: 0, hitDie: def?.hitDie ?? 8 };
     classes.push(entry);
@@ -217,9 +238,24 @@ export const applyLevelUp = (c: Character, plan: LevelUpPlan): Character => {
   const features = [...c.features, ...added];
 
   const { slots, pact } = computeSlots(classes);
+  let proficiencies = c.proficiencies;
+  let skills = c.skills;
+  const mp = multiclassing ? MULTICLASS_PROFS[plan.classId] : undefined;
+  if (mp) {
+    proficiencies = {
+      ...proficiencies,
+      armor: mergeList(proficiencies.armor, mp.armor),
+      weapons: mergeList(proficiencies.weapons, mp.weapons),
+      tools: mergeList(proficiencies.tools, mp.tools),
+    };
+    skills = { ...skills };
+    for (const sk of plan.skills ?? []) if (!skills[sk]) skills[sk] = 1;
+  }
   return refreshTrackers({
     ...c,
     classes,
+    proficiencies,
+    skills,
     features,
     hp: { ...c.hp, max: c.hp.max + plan.hpGain, current: c.hp.current + plan.hpGain },
     spellSlots: { max: slots, used: slots.map((_, i) => Math.min(c.spellSlots.used[i] ?? 0, slots[i])) },

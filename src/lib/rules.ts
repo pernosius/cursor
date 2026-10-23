@@ -249,3 +249,65 @@ export const inventoryWeight = (c: Character) =>
 
 export const classLine = (c: Pick<Character, 'classes'>) =>
   c.classes.map((x) => `${x.name}${x.subclass ? ` (${x.subclass})` : ''} ${x.level}`).join(' / ');
+
+// ---- Multiclassing (2024) ---------------------------------------------------
+
+/** Ability scores of 13+ required to multiclass into or out of a class. */
+export const MULTICLASS_PREREQ: Record<string, { all?: Ability[]; any?: Ability[] }> = {
+  barbarian: { all: ['str'] },
+  bard: { all: ['cha'] },
+  cleric: { all: ['wis'] },
+  druid: { all: ['wis'] },
+  fighter: { any: ['str', 'dex'] },
+  monk: { all: ['dex', 'wis'] },
+  paladin: { all: ['str', 'cha'] },
+  ranger: { all: ['dex', 'wis'] },
+  rogue: { all: ['dex'] },
+  sorcerer: { all: ['cha'] },
+  warlock: { all: ['cha'] },
+  wizard: { all: ['int'] },
+};
+
+/** Proficiencies gained when a class isn't your first. */
+export const MULTICLASS_PROFS: Record<string, { armor: string[]; weapons: string[]; tools: string[]; skills: number; instrument?: boolean }> = {
+  barbarian: { armor: ['Shields'], weapons: ['Martial Weapons'], tools: [], skills: 0 },
+  bard: { armor: ['Light Armor'], weapons: [], tools: [], skills: 1, instrument: true },
+  cleric: { armor: ['Light Armor', 'Medium Armor', 'Shields'], weapons: [], tools: [], skills: 0 },
+  druid: { armor: ['Light Armor', 'Shields'], weapons: [], tools: [], skills: 0 },
+  fighter: { armor: ['Light Armor', 'Medium Armor', 'Shields'], weapons: ['Martial Weapons'], tools: [], skills: 0 },
+  monk: { armor: [], weapons: [], tools: [], skills: 0 },
+  paladin: { armor: ['Light Armor', 'Medium Armor', 'Shields'], weapons: ['Martial Weapons'], tools: [], skills: 0 },
+  ranger: { armor: ['Light Armor', 'Medium Armor', 'Shields'], weapons: ['Martial Weapons'], tools: [], skills: 1 },
+  rogue: { armor: ['Light Armor'], weapons: [], tools: ["Thieves' Tools"], skills: 1 },
+  sorcerer: { armor: [], weapons: [], tools: [], skills: 0 },
+  warlock: { armor: ['Light Armor'], weapons: [], tools: [], skills: 0 },
+  wizard: { armor: [], weapons: [], tools: [], skills: 0 },
+};
+
+const abilityName = (a: Ability) => ABILITIES.find((x) => x.id === a)!.name;
+
+/** Lists unmet requirements, e.g. ["Paladin needs Strength 13"]. Empty means allowed. */
+export const multiclassProblems = (
+  scores: Record<Ability, number>,
+  classIds: string[],
+  names: Record<string, string> = {},
+): string[] => {
+  const out: string[] = [];
+  for (const id of classIds) {
+    const req = MULTICLASS_PREREQ[id];
+    if (!req) continue;
+    const label = names[id] ?? id[0].toUpperCase() + id.slice(1);
+    const missingAll = (req.all ?? []).filter((a) => scores[a] < 13);
+    if (missingAll.length) out.push(`${label} needs ${missingAll.map((a) => `${abilityName(a)} 13`).join(' and ')}`);
+    if (req.any && !req.any.some((a) => scores[a] >= 13))
+      out.push(`${label} needs ${req.any.map((a) => `${abilityName(a)} 13`).join(' or ')}`);
+  }
+  return out;
+};
+
+/** Merges comma lists without duplicates, e.g. "Light Armor" + ["Light Armor", "Shields"]. */
+export const mergeList = (existing: string, add: string[]) => {
+  const items = existing.split(/,\s*/).filter(Boolean);
+  for (const a of add) if (!items.some((x) => x.toLowerCase() === a.toLowerCase())) items.push(a);
+  return items.join(', ');
+};

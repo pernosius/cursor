@@ -1,6 +1,6 @@
 import { createSyncedStore } from './synced';
 import {
-  normalizeEntry, toSrdBackground, toSrdFeat, toSrdItem, toSrdSpecies, toSrdSpell, toSrdSubclass,
+  normalizeEntry, toSrdBackground, toSrdClass, toSrdFeat, toSrdItem, toSrdSpecies, toSrdSpell, toSrdSubclass,
   type HomebrewEntry, type HomebrewKind,
 } from '../lib/homebrew';
 import { setHomebrewContent } from '../lib/srd';
@@ -31,6 +31,7 @@ const publish = (items: Record<string, HomebrewEntry>) => {
   const subclasses: Record<string, ReturnType<typeof toSrdSubclass>[]> = {};
   for (const e of of('subclass')) (subclasses[e.data.classId] ??= []).push(toSrdSubclass(e));
   setHomebrewContent({
+    classes: of('class').map(toSrdClass),
     species: of('species').map(toSrdSpecies),
     backgrounds: of('background').map(toSrdBackground),
     feats: of('feat').map(toSrdFeat),

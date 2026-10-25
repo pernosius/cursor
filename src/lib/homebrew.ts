@@ -1,11 +1,12 @@
 import type { Ability, SkillId } from './types';
-import type { SrdBackground, SrdFeat, SrdItem, SrdSpecies, SrdSpell, SrdSubclass } from './srd';
+import type { SrdBackground, SrdClass, SrdFeat, SrdItem, SrdSpecies, SrdSpell, SrdSubclass } from './srd';
 import { uid } from './id';
 import { ABILITIES, SKILLS } from './rules';
 
-export type HomebrewKind = 'spell' | 'item' | 'species' | 'background' | 'feat' | 'subclass';
+export type HomebrewKind = 'spell' | 'item' | 'species' | 'background' | 'feat' | 'subclass' | 'class';
 
 export const HOMEBREW_KINDS: { id: HomebrewKind; label: string; plural: string }[] = [
+  { id: 'class', label: 'Class', plural: 'Classes' },
   { id: 'spell', label: 'Spell', plural: 'Spells' },
   { id: 'species', label: 'Species', plural: 'Species' },
   { id: 'subclass', label: 'Subclass', plural: 'Subclasses' },
@@ -25,6 +26,29 @@ export interface HomebrewBackground {
   abilities: Ability[]; feat: string; skills: SkillId[]; tools: string; equipment: string; desc: string;
 }
 export interface HomebrewFeat { type: string; prerequisite: string; desc: string }
+export interface HomebrewClassLevel {
+  level: number;
+  features: Trait[];
+  cantrips: number;
+  prepared: number;
+  slots: number[];
+  specific: Record<string, unknown>;
+}
+export interface HomebrewClass {
+  hitDie: number;
+  primary: string;
+  saves: Ability[];
+  skillChoices: { choose: number; from: SkillId[] };
+  armor: string;
+  weapons: string;
+  tools: string;
+  caster: 'full' | 'half' | 'third' | 'pact' | 'none';
+  spellAbility: Ability | null;
+  levels: HomebrewClassLevel[];
+  desc: string;
+  /** Names of spells on this class's list (beyond spells tagged with the class) */
+  spellList?: string[];
+}
 export interface HomebrewSubclass { classId: string; desc: string; features: (Trait & { level: number })[] }
 export interface HomebrewItem {
   category: string; rarity: string; attunement: boolean; weight: number; cost: string; desc: string;
@@ -34,7 +58,7 @@ export interface HomebrewItem {
 
 interface DataByKind {
   spell: HomebrewSpell; species: HomebrewSpecies; background: HomebrewBackground;
-  feat: HomebrewFeat; subclass: HomebrewSubclass; item: HomebrewItem;
+  feat: HomebrewFeat; subclass: HomebrewSubclass; item: HomebrewItem; class: HomebrewClass;
 }
 
 export type HomebrewEntry<K extends HomebrewKind = HomebrewKind> = {
@@ -59,6 +83,11 @@ export const blankData = <K extends HomebrewKind>(kind: K): DataByKind[K] => {
     feat: { type: 'general', prerequisite: '', desc: '' },
     subclass: { classId: '', desc: '', features: [] },
     item: { category: 'Gear', rarity: '', attunement: false, weight: 0, cost: '', desc: '' },
+    class: {
+      hitDie: 8, primary: '', saves: [], skillChoices: { choose: 2, from: [] }, armor: '', weapons: '', tools: '',
+      caster: 'none', spellAbility: null, desc: '',
+      levels: Array.from({ length: 20 }, (_, i) => ({ level: i + 1, features: [], cantrips: 0, prepared: 0, slots: Array(9).fill(0), specific: {} })),
+    },
   };
   return d[kind] as DataByKind[K];
 };
@@ -85,6 +114,54 @@ export const normalizeEntry = (raw: Partial<HomebrewEntry>): HomebrewEntry => {
 // ---- Conversion to the shapes the rest of the app already understands ----
 
 const hbId = (e: { id: string }) => `hb-${e.id}`;
+
+/** Homebrew classes are keyed by name ("artificer") so subclasses can point at them. */
+export const classSlug = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/** Standard slot rows by caster level, used when a homebrew class has no slot table. */
+const FULL_SLOTS = [
+  [2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2], [4, 3, 3, 3, 1], [4, 3, 3, 3, 2],
+  [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1],
+  [4, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1, 1], [4, 3, 3, 3, 3, 1, 1, 1, 1], [4, 3, 3, 3, 3, 2, 1, 1, 1],
+  [4, 3, 3, 3, 3, 2, 2, 1, 1],
+];
+const pad9 = (row: number[] = []) => Array.from({ length: 9 }, (_, i) => row[i] ?? 0);
+const defaultSlots = (caster: HomebrewClass['caster'], level: number) => {
+  const casterLevel =
+    caster === 'full' ? level : caster === 'half' ? Math.ceil(level / 2) : caster === 'third' ? Math.floor(level / 3) : 0;
+  return casterLevel ? pad9(FULL_SLOTS[casterLevel - 1]) : pad9();
+};
+
+export const toSrdClass = (e: HomebrewEntry<'class'>): SrdClass & { source: string } => {
+  const d = e.data;
+  const hasTable = d.levels.some((l) => l.slots?.some((n) => n > 0));
+  return {
+    id: classSlug(e.name),
+    name: e.name,
+    source: e.source || 'Homebrew',
+    hitDie: d.hitDie,
+    primary: d.primary,
+    saves: d.saves,
+    proficiencies: [d.armor, d.weapons, d.tools].filter(Boolean),
+    skillChoices: d.skillChoices.from.length ? d.skillChoices : null,
+    caster: d.caster === 'third' ? 'half' : d.caster,
+    casterDivisor: d.caster === 'third' ? 3 : undefined,
+    spellAbility: d.spellAbility,
+    levels: Array.from({ length: 20 }, (_, i) => {
+      const l = d.levels[i] ?? { level: i + 1, features: [], cantrips: 0, prepared: 0, slots: [], specific: {} };
+      return {
+        level: i + 1,
+        features: l.features,
+        cantrips: l.cantrips,
+        prepared: l.prepared,
+        slots: d.caster === 'none' ? null : hasTable ? pad9(l.slots) : defaultSlots(d.caster, i + 1),
+        specific: l.specific ?? {},
+      };
+    }),
+    subclasses: [],
+    spellList: d.spellList ?? [],
+  };
+};
 
 export const toSrdSpell = (e: HomebrewEntry<'spell'>): SrdSpell & { source: string } => ({
   id: hbId(e), name: e.name, source: e.source || 'Homebrew', ...e.data,
@@ -340,7 +417,28 @@ export function parseItem(text: string): ParseResult {
   return { name, source, data };
 }
 
+export function parseClass(text: string): ParseResult {
+  const sub = parseSubclass(text);
+  const d = blankData('class');
+  const t = text.replace(/\*\*/g, '');
+  const hit = t.match(/Hit (?:Point )?Die[:|\s]*d(\d+)/i);
+  if (hit) d.hitDie = Number(hit[1]);
+  const prim = t.match(/Primary Ability[:|\s]*([A-Za-z ,]+?)(?:\||\n|$)/i);
+  if (prim) d.primary = prim[1].trim();
+  const saves = t.match(/Saving Throw(?: Proficiencies)?[:|\s]*([A-Za-z ,]+?)(?:\||\n|$)/i);
+  if (saves) d.saves = ABILITIES.filter((a) => saves[1].includes(a.name)).map((a) => a.id);
+  const ab = t.match(/(Intelligence|Wisdom|Charisma) is (?:your|the) spellcasting ability/i);
+  if (ab) d.spellAbility = abilityFromWord(ab[1]) ?? null;
+  for (const f of (sub.data as HomebrewSubclass).features) {
+    const lv = d.levels[f.level - 1];
+    if (lv) lv.features.push({ name: f.name, desc: f.desc });
+  }
+  d.desc = (sub.data as HomebrewSubclass).desc;
+  return { name: sub.name, source: sub.source, data: d };
+}
+
 export const PARSERS: Record<HomebrewKind, (text: string) => ParseResult> = {
+  class: parseClass,
   spell: parseSpell,
   species: parseSpecies,
   feat: parseFeat,

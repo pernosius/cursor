@@ -15,7 +15,8 @@ import { levelName } from '../components/CompendiumList';
 
 export default function Homebrew() {
   const navigate = useNavigate();
-  const { items, add, update, remove } = useHomebrew();
+  const { items, add, addMany, update, remove } = useHomebrew();
+  const [limit, setLimit] = useState(60);
   const notify = useUi((s) => s.notify);
   const [kind, setKind] = useState<HomebrewKind | 'all'>('all');
   const [q, setQ] = useState('');
@@ -61,13 +62,17 @@ export default function Homebrew() {
       const json = JSON.parse(await file.text());
       const rows: Partial<HomebrewEntry>[] = Array.isArray(json) ? json : json.entries ?? [];
       const known = new Set(Object.values(items).filter((e) => !e.deleted).map((e) => `${e.kind}|${e.name.toLowerCase()}`));
-      let n = 0;
+      const now = Date.now();
+      const fresh: HomebrewEntry[] = [];
       for (const r of rows) {
         if (!r?.name || !r.kind || !HOMEBREW_KINDS.some((k) => k.id === r.kind)) continue;
-        if (known.has(`${r.kind}|${r.name.toLowerCase()}`)) continue;
-        add(normalizeEntry({ ...r, id: uid(), createdAt: Date.now(), updatedAt: Date.now(), deleted: false }));
-        n++;
+        const key = `${r.kind}|${r.name.toLowerCase()}`;
+        if (known.has(key)) continue;
+        known.add(key);
+        fresh.push(normalizeEntry({ ...r, id: uid(), createdAt: now, updatedAt: now, deleted: false }));
       }
+      addMany(fresh);
+      const n = fresh.length;
       notify(n ? `Imported ${n} entr${n === 1 ? 'y' : 'ies'}` : 'Nothing new to import');
     } catch {
       notify('That file could not be read');
@@ -132,7 +137,7 @@ export default function Homebrew() {
         </div>
       ) : (
         <div>
-          {list.map((e) => (
+          {list.slice(0, limit).map((e) => (
             <div key={e.id} className="entry">
               <div className="entry-head" onClick={() => setOpen(open === e.id ? null : e.id)}>
                 <div className="grow">
@@ -154,6 +159,11 @@ export default function Homebrew() {
               )}
             </div>
           ))}
+          {list.length > limit && (
+            <button className="btn block" style={{ marginTop: 10 }} onClick={() => setLimit((n) => n + 100)}>
+              Show more ({list.length - limit} left)
+            </button>
+          )}
           {list.length === 0 && <p className="muted small">Nothing matches.</p>}
         </div>
       )}
@@ -291,6 +301,8 @@ function summary(e: HomebrewEntry): string {
       return e.data.feat ? `Feat: ${e.data.feat}` : 'Background';
     case 'item':
       return [e.data.category, e.data.rarity].filter(Boolean).join(', ');
+    case 'class':
+      return `d${e.data.hitDie} · ${e.data.caster === 'none' ? 'no spellcasting' : `${e.data.caster} caster`}`;
   }
 }
 
@@ -308,11 +320,11 @@ function Details({ e }: { e: HomebrewEntry }) {
         </>
       );
     case 'species':
-      return <RichText text={e.data.traits.map((t) => `**${t.name}.** ${t.desc}`).join('\n') || 'No traits.'} />;
+      return <RichText text={e.data.traits.map((t) => `**${t.name}.** ${t.desc}`).join('\n\n') || 'No traits.'} />;
     case 'subclass':
       return (
         <RichText
-          text={[e.data.desc, ...e.data.features.map((f) => `**Level ${f.level}: ${f.name}.** ${f.desc}`)].filter(Boolean).join('\n') || 'No features.'}
+          text={[e.data.desc, ...e.data.features.map((f) => `**Level ${f.level}: ${f.name}.** ${f.desc}`)].filter(Boolean).join('\n\n') || 'No features.'}
         />
       );
     case 'background':
@@ -331,5 +343,19 @@ function Details({ e }: { e: HomebrewEntry }) {
       return <RichText text={(e.data.prerequisite ? `**Prerequisite.** ${e.data.prerequisite}\n` : '') + (e.data.desc || 'No description.')} />;
     case 'item':
       return <RichText text={e.data.desc || 'No description.'} />;
+    case 'class':
+      return (
+        <RichText
+          text={[
+            e.data.primary && `**Primary Ability.** ${e.data.primary}`,
+            e.data.saves.length ? `**Saving Throws.** ${e.data.saves.map((a) => ABILITIES.find((x) => x.id === a)?.name).join(', ')}` : '',
+            e.data.armor && `**Armor.** ${e.data.armor}`,
+            e.data.weapons && `**Weapons.** ${e.data.weapons}`,
+            ...e.data.levels.flatMap((l) => l.features.map((f) => `**Level ${l.level}: ${f.name}.** ${f.desc.split('\n')[0]}`)),
+          ]
+            .filter(Boolean)
+            .join('\n')}
+        />
+      );
   }
 }

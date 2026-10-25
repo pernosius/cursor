@@ -198,14 +198,72 @@ export function TextInput({
   );
 }
 
-/** Renders SRD text, turning **bold** runs into <strong>. */
-export function RichText({ text, className }: { text: string; className?: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+/** Inline markdown: **bold** and *italic*. */
+function Inline({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g);
   return (
-    <div className={cx('desc', className)}>
-      {parts.map((p, i) => (p.startsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>))}
-    </div>
+    <>
+      {parts.map((p, i) =>
+        p.startsWith('**') ? (
+          <strong key={i}>{p.slice(2, -2)}</strong>
+        ) : p.length > 2 && p.startsWith('*') && p.endsWith('*') ? (
+          <em key={i}>{p.slice(1, -1)}</em>
+        ) : (
+          <span key={i}>{p}</span>
+        ),
+      )}
+    </>
   );
+}
+
+const cells = (line: string) => line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+
+/** Renders rules text: paragraphs, bullet lists, markdown tables, bold and italics. */
+export function RichText({ text, className }: { text: string; className?: string }) {
+  const lines = text.replace(/\r/g, '').split('\n');
+  const blocks: React.ReactNode[] = [];
+  for (let i = 0; i < lines.length; ) {
+    const line = lines[i];
+    if (/^\s*\|/.test(line)) {
+      const rows: string[][] = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) {
+        const c = cells(lines[i++]);
+        if (!c.every((x) => /^:?-{2,}:?$/.test(x) || x === '')) rows.push(c);
+      }
+      const [head, ...body] = rows;
+      blocks.push(
+        <div key={blocks.length} className="rt-table">
+          <table>
+            {head && (
+              <thead>
+                <tr>{head.map((c, j) => <th key={j}><Inline text={c} /></th>)}</tr>
+              </thead>
+            )}
+            <tbody>
+              {body.map((r, k) => (
+                <tr key={k}>{r.map((c, j) => <td key={j}><Inline text={c} /></td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+    } else if (/^\s*[*-]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[*-]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[*-]\s+/, ''));
+      blocks.push(
+        <ul key={blocks.length}>
+          {items.map((t, k) => <li key={k}><Inline text={t} /></li>)}
+        </ul>,
+      );
+    } else if (!line.trim()) {
+      i++;
+    } else {
+      const para: string[] = [];
+      while (i < lines.length && lines[i].trim() && !/^\s*(\||[*-]\s)/.test(lines[i])) para.push(lines[i++]);
+      blocks.push(<p key={blocks.length}><Inline text={para.join('\n')} /></p>);
+    }
+  }
+  return <div className={cx('desc', className)}>{blocks}</div>;
 }
 
 export function Avatar({ name, src, size }: { name: string; src?: string; size?: 'lg' }) {

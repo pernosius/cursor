@@ -31,7 +31,9 @@ export default function LevelUp({
   const die = def?.hitDie ?? 8;
   const needsSub = !!def && newLevel >= 3 && !existing?.subclass;
   const multiclassing = !!def && !existing && c.classes.length > 0;
-  const mp = multiclassing ? MULTICLASS_PROFS[def!.id] : undefined;
+  const mp = multiclassing
+    ? (MULTICLASS_PROFS[def!.id] ?? { armor: [], weapons: [], tools: [], skills: 0 })
+    : undefined;
   const problems = multiclassing
     ? multiclassProblems(c.abilities, [...c.classes.map((x) => x.id), def!.id], Object.fromEntries(CLASSES.map((x) => [x.id, x.name])))
     : [];

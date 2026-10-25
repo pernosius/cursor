@@ -15,6 +15,8 @@ export interface SyncedState<T extends SyncedRecord> {
   dirty: Set<string>;
   load: () => Promise<void>;
   add: (item: T) => void;
+  /** Adds many records in one state update (bulk import). */
+  addMany: (items: T[]) => void;
   update: (id: string, fn: (item: T) => T) => void;
   remove: (id: string) => void;
   /** Merge rows that came from the cloud (last write wins by updatedAt). */
@@ -85,6 +87,21 @@ export function createSyncedStore<T extends SyncedRecord>(opts: {
     add: (item) => {
       setState({ items: { ...getState().items, [item.id]: item }, dirty: new Set(getState().dirty).add(item.id) });
       persistSoon(item);
+      changed();
+    },
+
+    addMany: (list) => {
+      if (!list.length) return;
+      const items = { ...getState().items };
+      const dirty = new Set(getState().dirty);
+      for (const item of list) {
+        items[item.id] = item;
+        dirty.add(item.id);
+        pending.set(item.id, item);
+      }
+      setState({ items, dirty });
+      clearTimeout(timer);
+      timer = setTimeout(flush, 250);
       changed();
     },
 

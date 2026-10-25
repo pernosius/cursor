@@ -61,3 +61,32 @@ describe('homebrew in character building', () => {
     expect(c.features.some((f) => f.name === 'Ember Blood')).toBe(true);
   });
 });
+
+describe('homebrew classes', () => {
+  it('builds characters from a homebrew class and multiclasses with it', async () => {
+    const { toSrdClass, newEntry } = await import('./homebrew');
+    const { computeSlots } = await import('./rules');
+    const { classById } = await import('./srd');
+    const tinker = newEntry('class', 'Tinker', 'Our table');
+    tinker.data.hitDie = 8;
+    tinker.data.saves = ['con', 'int'];
+    tinker.data.caster = 'half';
+    tinker.data.spellAbility = 'int';
+    tinker.data.primary = 'Intelligence';
+    tinker.data.levels[0].features.push({ name: 'Gadgets', desc: 'You build things.' });
+    setHomebrewContent({ classes: [toSrdClass(tinker)], species: [], backgrounds: [], feats: [], subclasses: {}, spells: [], items: [] });
+
+    expect(classById('tinker')?.name).toBe('Tinker');
+    const c = buildCharacter({ ...base, classId: 'tinker', level: 1 });
+    expect(c.saves.int && c.saves.con).toBe(true);
+    expect(c.spellAbility).toBe('int');
+    expect(c.spellSlots.max[0]).toBe(2); // half casters (rounded up) have slots at level 1
+    expect(c.features.some((f) => f.name === 'Gadgets')).toBe(true);
+    // Tinker 3 + Wizard 2: caster level ceil(3/2) + 2 = 4
+    expect(computeSlots([
+      { id: 'tinker', name: 'Tinker', level: 3, hitDie: 8 },
+      { id: 'wizard', name: 'Wizard', level: 2, hitDie: 6 },
+    ]).slots.slice(0, 2)).toEqual([4, 3]);
+    expect(multiclassProblems({ ...base.abilities, int: 12 }, ['tinker'])).toEqual(['Tinker needs Intelligence 13']);
+  });
+});

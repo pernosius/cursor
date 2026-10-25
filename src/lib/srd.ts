@@ -30,9 +30,13 @@ export interface SrdClass {
   proficiencies: string[];
   skillChoices: { choose: number; from: SkillId[] } | null;
   caster: 'full' | 'half' | 'pact' | 'none';
+  /** 3 for one-third casters (multiclass slot math) */
+  casterDivisor?: number;
   spellAbility: Ability | null;
   levels: SrdClassLevel[];
   subclasses: SrdSubclass[];
+  /** Homebrew classes: spells on the class list by name */
+  spellList?: string[];
 }
 export interface SrdSpecies {
   id: string;
@@ -100,7 +104,9 @@ export interface SrdItem {
   };
 }
 
-export const CLASSES = classesData as unknown as SrdClass[];
+const SRD_CLASSES = classesData as unknown as SrdClass[];
+/** SRD classes plus homebrew ones; updated in place when the library changes. */
+export const CLASSES: SrdClass[] = [...SRD_CLASSES];
 export const SPECIES = speciesData as unknown as SrdSpecies[];
 export const BACKGROUNDS = backgroundsData as unknown as SrdBackground[];
 export const FEATS = featsData as unknown as SrdFeat[];
@@ -114,6 +120,7 @@ export const classById = (id: string) => CLASSES.find((c) => c.id === id);
 
 type WithSource<T> = T & { source?: string };
 const extra = {
+  classes: [] as WithSource<SrdClass>[],
   species: [] as WithSource<SrdSpecies>[],
   backgrounds: [] as WithSource<SrdBackground>[],
   feats: [] as WithSource<SrdFeat>[],
@@ -121,7 +128,11 @@ const extra = {
   spells: [] as WithSource<SrdSpell>[],
   items: [] as WithSource<SrdItem>[],
 };
-export const setHomebrewContent = (next: typeof extra) => Object.assign(extra, next);
+export const setHomebrewContent = (next: Omit<typeof extra, 'classes'> & { classes?: WithSource<SrdClass>[] }) => {
+  Object.assign(extra, { classes: [], ...next });
+  const srdIds = new Set(SRD_CLASSES.map((c) => c.id));
+  CLASSES.splice(0, CLASSES.length, ...SRD_CLASSES, ...extra.classes.filter((c) => !srdIds.has(c.id)));
+};
 
 export const allSpecies = (): WithSource<SrdSpecies>[] => [...SPECIES, ...extra.species];
 export const allBackgrounds = (): WithSource<SrdBackground>[] => [...BACKGROUNDS, ...extra.backgrounds];

@@ -51,6 +51,8 @@ export const CLASS_COLORS: Record<string, string> = {
   sorcerer: '#a63d4a', // crimson
   warlock: '#3f8a7d', // verdigris
   wizard: '#4f74a8', // lapis
+  artificer: '#9c7c4c', // aged bronze
+  psion: '#8f6f9a', // dusk mauve
 };
 export const DEFAULT_ACCENT = '#b8955a';
 
@@ -205,7 +207,7 @@ export interface SlotCalc {
 export const computeSlots = (classes: ClassEntry[]): SlotCalc => {
   const empty = Array(9).fill(0);
   let pact = { level: 0, max: 0 };
-  const casters: { entry: ClassEntry; kind: 'full' | 'half' }[] = [];
+  const casters: { entry: ClassEntry; kind: 'full' | 'half'; divisor: number }[] = [];
   for (const entry of classes) {
     const def = classById(entry.id);
     if (!def) continue;
@@ -214,7 +216,7 @@ export const computeSlots = (classes: ClassEntry[]): SlotCalc => {
       const lvl = row.findIndex((n) => n > 0);
       if (lvl >= 0) pact = { level: lvl + 1, max: row[lvl] };
     } else if (def.caster === 'full' || def.caster === 'half') {
-      casters.push({ entry, kind: def.caster });
+      casters.push({ entry, kind: def.caster, divisor: def.casterDivisor ?? 2 });
     }
   }
   if (casters.length === 0) return { slots: empty, pact };
@@ -225,7 +227,8 @@ export const computeSlots = (classes: ClassEntry[]): SlotCalc => {
   }
   // 2024: half casters contribute half their level, rounded up.
   const casterLevel = casters.reduce(
-    (s, { entry, kind }) => s + (kind === 'full' ? entry.level : Math.ceil(entry.level / 2)),
+    (s, { entry, kind, divisor }) =>
+      s + (kind === 'full' ? entry.level : divisor === 3 ? Math.floor(entry.level / 3) : Math.ceil(entry.level / 2)),
     0,
   );
   return { slots: [...MULTICLASS_SLOTS[Math.min(casterLevel, 20)]], pact };
@@ -251,6 +254,14 @@ export const classLine = (c: Pick<Character, 'classes'>) =>
   c.classes.map((x) => `${x.name}${x.subclass ? ` (${x.subclass})` : ''} ${x.level}`).join(' / ');
 
 // ---- Multiclassing (2024) ---------------------------------------------------
+
+/** Homebrew classes: read "Strength and Charisma" / "Strength or Dexterity" from the primary ability. */
+const prereqFromPrimary = (id: string): { all?: Ability[]; any?: Ability[] } | undefined => {
+  const text = classById(id)?.primary ?? '';
+  const found = ABILITIES.filter((a) => text.includes(a.name)).map((a) => a.id);
+  if (!found.length) return undefined;
+  return / or /i.test(text) ? { any: found } : { all: found };
+};
 
 /** Ability scores of 13+ required to multiclass into or out of a class. */
 export const MULTICLASS_PREREQ: Record<string, { all?: Ability[]; any?: Ability[] }> = {
@@ -294,7 +305,7 @@ export const multiclassProblems = (
 ): string[] => {
   const out: string[] = [];
   for (const id of classIds) {
-    const req = MULTICLASS_PREREQ[id];
+    const req = MULTICLASS_PREREQ[id] ?? prereqFromPrimary(id);
     if (!req) continue;
     const label = names[id] ?? id[0].toUpperCase() + id.slice(1);
     const missingAll = (req.all ?? []).filter((a) => scores[a] < 13);

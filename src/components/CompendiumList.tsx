@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, Plus, Search } from 'lucide-react';
-import { CLASSES, homebrewItems, homebrewSpells, loadItems, loadSpells, type SrdItem, type SrdSpell } from '../lib/srd';
+import { CLASSES, classById, homebrewItems, homebrewSpells, loadItems, loadSpells, type SrdItem, type SrdSpell } from '../lib/srd';
 import { useHomebrew } from '../store/homebrew';
 import { RichText, cx } from './ui';
 
@@ -60,9 +60,10 @@ export function SpellBrowser({
   const list = useMemo(() => {
     const n = q.trim().toLowerCase();
     const all = spells ? [...spells, ...homebrewSpells()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)) : [];
+    const listed = new Set(cls ? classById(cls)?.spellList ?? [] : []);
     return all.filter(
       (s) =>
-        (!cls || s.classes.includes(cls)) &&
+        (!cls || s.classes.includes(cls) || listed.has(s.name)) &&
         (level == null || s.level === level) &&
         (!n || s.name.toLowerCase().includes(n) || s.school.toLowerCase().includes(n)),
     );

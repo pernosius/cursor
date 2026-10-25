@@ -195,7 +195,7 @@ export default function Spells({ c, upd }: TabProps) {
         </div>
         {c.spells.length === 0 && (
           <p className="muted small" style={{ marginBottom: 12 }}>
-            Your spellbook is empty. Add spells from the SRD or write your own.
+            Your spellbook is empty. Add spells from the compendium and your homebrew, or write your own.
           </p>
         )}
         {groups.map(([level, spells]) => (

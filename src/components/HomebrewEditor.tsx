@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import type { Ability, SkillId } from '../lib/types';
 import {
-  HOMEBREW_KINDS, type HomebrewEntry, type HomebrewItem, type HomebrewKind, type Trait,
+  HOMEBREW_KINDS, type HomebrewClass, type HomebrewEntry, type HomebrewItem, type HomebrewKind, type Trait,
 } from '../lib/homebrew';
 import { ABILITIES, SKILLS } from '../lib/rules';
 import { CLASSES } from '../lib/srd';
@@ -221,8 +221,92 @@ export default function HomebrewEditor({
         )}
 
         {draft.kind === 'item' && <ItemFields d={d as unknown as HomebrewItem} setData={setData} />}
+
+        {draft.kind === 'class' && <ClassFields d={d as unknown as HomebrewClass} setData={setData} />}
       </div>
     </Modal>
+  );
+}
+
+function ClassFields({ d, setData }: { d: HomebrewClass; setData: (p: Record<string, unknown>) => void }) {
+  const features = d.levels.flatMap((l) => l.features.map((f) => ({ ...f, level: l.level })));
+  const setFeatures = (list: (Trait & { level: number })[]) =>
+    setData({
+      levels: d.levels.map((l) => ({ ...l, features: list.filter((f) => f.level === l.level).map(({ name, desc }) => ({ name, desc })) })),
+    });
+  const toggle = <T,>(list: T[], v: T, max?: number) => {
+    const next = list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
+    return max ? next.slice(-max) : next;
+  };
+  return (
+    <>
+      <div className="grid-2">
+        <label className="field">
+          <span>Hit die</span>
+          <select className="select" value={d.hitDie} onChange={(e) => setData({ hitDie: Number(e.target.value) })}>
+            {[6, 8, 10, 12].map((n) => <option key={n} value={n}>d{n}</option>)}
+          </select>
+        </label>
+        <Text label="Primary ability" v={d.primary} on={(primary) => setData({ primary })} placeholder="e.g. Intelligence" />
+        <label className="field">
+          <span>Spellcasting</span>
+          <select className="select" value={d.caster} onChange={(e) => setData({ caster: e.target.value })}>
+            <option value="none">None</option>
+            <option value="full">Full caster (like Wizard)</option>
+            <option value="half">Half caster (like Paladin)</option>
+            <option value="third">One-third caster</option>
+            <option value="pact">Pact Magic (like Warlock)</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Spellcasting ability</span>
+          <select className="select" value={d.spellAbility ?? ''} onChange={(e) => setData({ spellAbility: e.target.value || null })}>
+            <option value="">—</option>
+            {ABILITIES.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </label>
+        <Text label="Armor training" v={d.armor} on={(armor) => setData({ armor })} />
+        <Text label="Weapon proficiencies" v={d.weapons} on={(weapons) => setData({ weapons })} />
+        <Text label="Tool proficiencies" v={d.tools} on={(tools) => setData({ tools })} />
+        <label className="field">
+          <span>Skills to choose</span>
+          <input
+            className="input"
+            inputMode="numeric"
+            value={d.skillChoices.choose}
+            onChange={(e) => setData({ skillChoices: { ...d.skillChoices, choose: Number(e.target.value.replace(/\D/g, '')) || 0 } })}
+          />
+        </label>
+      </div>
+      <div className="field">
+        <span>Saving throws</span>
+        <div className="chips">
+          {ABILITIES.map((a) => (
+            <button key={a.id} className={cx('chip', d.saves.includes(a.id) && 'on')} onClick={() => setData({ saves: toggle(d.saves, a.id, 2) })}>
+              {a.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span>Skill list</span>
+        <div className="chips">
+          {SKILLS.map((sk) => (
+            <button
+              key={sk.id}
+              className={cx('chip', d.skillChoices.from.includes(sk.id) && 'on')}
+              onClick={() => setData({ skillChoices: { ...d.skillChoices, from: toggle(d.skillChoices.from, sk.id) } })}
+            >
+              {sk.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="faint tiny">
+        Spell slots follow the standard table for the caster type unless the class was imported with its own table.
+      </p>
+      <TraitList label="Class features" withLevel traits={features} onChange={setFeatures} />
+    </>
   );
 }
 
